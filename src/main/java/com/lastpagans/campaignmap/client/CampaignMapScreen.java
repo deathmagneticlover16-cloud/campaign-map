@@ -7,13 +7,17 @@ import com.lastpagans.campaignmap.geography.MapProjection;
 import com.lastpagans.campaignmap.geography.ProvinceRaster;
 import com.lastpagans.campaignmap.geography.ProvinceRegistry;
 import com.mojang.blaze3d.platform.NativeImage;
+import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.renderer.texture.AbstractTexture;
 import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import org.lwjgl.glfw.GLFW;
+import org.lwjgl.opengl.GL11;
+import org.lwjgl.opengl.GL12;
 
 import javax.annotation.Nullable;
 import java.util.Objects;
@@ -61,6 +65,8 @@ public final class CampaignMapScreen extends Screen {
         NativeImage pixels = new NativeImage(registry.raster().width(), registry.raster().height(), true);
         overlayTexture = new DynamicTexture(pixels);
         overlayLocation = minecraft.getTextureManager().register("campaignmap/overlay", overlayTexture);
+        clampTextureToSingleImage(minecraft.getTextureManager().getTexture(FRONTEND));
+        clampTextureToSingleImage(overlayTexture);
         rebuildOverlay();
     }
 
@@ -86,18 +92,24 @@ public final class CampaignMapScreen extends Screen {
     private void renderMapTextures(GuiGraphics graphics, int drawX, int drawY) {
         int mapWidth = registry.raster().width();
         int mapHeight = registry.raster().height();
+        int drawWidth = Math.max(1, (int) Math.round(mapWidth * scale));
+        int drawHeight = Math.max(1, (int) Math.round(mapHeight * scale));
 
-        // Keep the sampled texture region fixed at exactly 384x384 and scale the rendered
-        // quad. Passing the zoomed screen dimensions as UV dimensions samples beyond the
-        // source image and makes OpenGL repeat the texture into tiles.
-        graphics.pose().pushPose();
-        graphics.pose().translate(drawX, drawY, 0.0F);
-        graphics.pose().scale((float) scale, (float) scale, 1.0F);
-        graphics.blit(FRONTEND, 0, 0, 0, 0, mapWidth, mapHeight, mapWidth, mapHeight);
+        // This overload separates on-screen size from sampled texture size. Every zoom
+        // level therefore draws one quad sampling exactly the complete map once.
+        graphics.blit(FRONTEND, drawX, drawY, drawWidth, drawHeight,
+                0.0F, 0.0F, mapWidth, mapHeight, mapWidth, mapHeight);
         if (politicalMode && overlayLocation != null) {
-            graphics.blit(overlayLocation, 0, 0, 0, 0, mapWidth, mapHeight, mapWidth, mapHeight);
+            graphics.blit(overlayLocation, drawX, drawY, drawWidth, drawHeight,
+                    0.0F, 0.0F, mapWidth, mapHeight, mapWidth, mapHeight);
         }
-        graphics.pose().popPose();
+    }
+
+    private static void clampTextureToSingleImage(AbstractTexture texture) {
+        texture.setFilter(false, false);
+        texture.bind();
+        RenderSystem.texParameter(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_WRAP_S, GL12.GL_CLAMP_TO_EDGE);
+        RenderSystem.texParameter(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_WRAP_T, GL12.GL_CLAMP_TO_EDGE);
     }
 
     private void renderLabels(GuiGraphics graphics, int drawX, int drawY) {
