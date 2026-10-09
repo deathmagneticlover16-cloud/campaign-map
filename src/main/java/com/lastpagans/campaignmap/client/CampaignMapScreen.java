@@ -51,6 +51,13 @@ public final class CampaignMapScreen extends Screen {
             scale = Math.max(0.25, Math.min(4.0, scale));
             initialLayout = false;
         }
+        // init() runs again when the window is resized. Release the previous texture so
+        // there is always exactly one campaign overlay registered with Minecraft.
+        if (overlayLocation != null) {
+            minecraft.getTextureManager().release(overlayLocation);
+            overlayLocation = null;
+            overlayTexture = null;
+        }
         NativeImage pixels = new NativeImage(registry.raster().width(), registry.raster().height(), true);
         overlayTexture = new DynamicTexture(pixels);
         overlayLocation = minecraft.getTextureManager().register("campaignmap/overlay", overlayTexture);
@@ -67,20 +74,30 @@ public final class CampaignMapScreen extends Screen {
         graphics.enableScissor(8, 8, viewportRight, height - 8);
         int drawX = mapDrawX();
         int drawY = mapDrawY();
-        int drawWidth = Math.max(1, (int) Math.round(registry.raster().width() * scale));
-        int drawHeight = Math.max(1, (int) Math.round(registry.raster().height() * scale));
-        graphics.blit(FRONTEND, drawX, drawY, 0, 0, drawWidth, drawHeight,
-                registry.raster().width(), registry.raster().height());
-        if (politicalMode && overlayLocation != null) {
-            graphics.blit(overlayLocation, drawX, drawY, 0, 0, drawWidth, drawHeight,
-                    registry.raster().width(), registry.raster().height());
-        }
+        renderMapTextures(graphics, drawX, drawY);
         renderLabels(graphics, drawX, drawY);
         graphics.disableScissor();
         renderPanel(graphics);
         graphics.drawString(font, Component.literal("Wheel: zoom  •  Right-drag: pan  •  P: political layer  •  Esc: close"),
                 12, height - 17, 0xFFBBC2CB, false);
         super.render(graphics, mouseX, mouseY, partialTick);
+    }
+
+    private void renderMapTextures(GuiGraphics graphics, int drawX, int drawY) {
+        int mapWidth = registry.raster().width();
+        int mapHeight = registry.raster().height();
+
+        // Keep the sampled texture region fixed at exactly 384x384 and scale the rendered
+        // quad. Passing the zoomed screen dimensions as UV dimensions samples beyond the
+        // source image and makes OpenGL repeat the texture into tiles.
+        graphics.pose().pushPose();
+        graphics.pose().translate(drawX, drawY, 0.0F);
+        graphics.pose().scale((float) scale, (float) scale, 1.0F);
+        graphics.blit(FRONTEND, 0, 0, 0, 0, mapWidth, mapHeight, mapWidth, mapHeight);
+        if (politicalMode && overlayLocation != null) {
+            graphics.blit(overlayLocation, 0, 0, 0, 0, mapWidth, mapHeight, mapWidth, mapHeight);
+        }
+        graphics.pose().popPose();
     }
 
     private void renderLabels(GuiGraphics graphics, int drawX, int drawY) {
@@ -276,6 +293,7 @@ public final class CampaignMapScreen extends Screen {
     @Override
     public void removed() {
         if (overlayLocation != null) Minecraft.getInstance().getTextureManager().release(overlayLocation);
+        overlayLocation = null;
         overlayTexture = null;
     }
 
