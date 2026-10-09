@@ -1,0 +1,17 @@
+{
+  "projection": {
+    "worldMinX": -200,
+    "worldMaxX": 199,
+    "worldMinZ": -200,
+    "worldMaxZ": 199,
+    "flipX": false,
+    "flipZ": false
+  },
+  "unassignedRgb": [0, 0, 0],
+  "provinces": [
+    {"id": "campaignmap:province_0", "name": "Treeia",  "rgb": [0, 127, 14]},
+    {"id": "campaignmap:province_1", "name": "Wateria", "rgb": [255, 23, 2]},
+    {"id": "campaignmap:province_2", "name": "Landia",  "rgb": [255, 106, 0]},
+    {"id": "campaignmap:province_3", "name": "Beachia", "rgb": [72, 0, 255]}
+  ]
+}
