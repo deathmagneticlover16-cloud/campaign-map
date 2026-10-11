@@ -79,7 +79,7 @@ public final class CampaignMapCommands {
             source.sendFailure(Component.literal("World coordinate is outside the configured campaign map bounds."));
             return 0;
         }
-        int rgb = registry.raster().rgbAt(sample.pixel().x(), sample.pixel().y());
+        int rgb = registry.pixelMap().rgbAt(sample.pixel().x(), sample.pixel().y());
         ProvinceDefinition province = registry.atPixel(sample.pixel().x(), sample.pixel().y());
         String resolved = province == null ? "NO PROVINCE" : province.id() + " / " + province.name();
         source.sendSuccess(() -> Component.literal(String.format(Locale.ROOT,

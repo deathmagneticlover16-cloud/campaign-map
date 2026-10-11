@@ -2,7 +2,7 @@ package com.lastpagans.campaignmap.geography;
 
 import java.util.Optional;
 
-/** The single conversion point between Minecraft X/Z and raster X/Y. */
+/** The single conversion point between Minecraft X/Z and province-image pixel X/Y. */
 public final class MapProjection {
     private final double worldMinX;
     private final double worldMaxX;
@@ -19,7 +19,7 @@ public final class MapProjection {
             throw new IllegalArgumentException("World maximums must be greater than minimums");
         }
         if (imageWidth < 1 || imageHeight < 1) {
-            throw new IllegalArgumentException("Raster dimensions must be positive");
+            throw new IllegalArgumentException("Province image dimensions must be positive");
         }
         this.worldMinX = worldMinX;
         this.worldMaxX = worldMaxX;

@@ -1,6 +1,6 @@
 # Last Pagans Campaign Map
 
-Forge 1.20.1 mod providing an authoritative raster province system and fullscreen political campaign map.
+Forge 1.20.1 mod providing an authoritative pixel-based province system and fullscreen political campaign map.
 
 ## Use
 
@@ -14,9 +14,9 @@ The visible terrain comes from `campaign_front.png`. Province identity always co
 
 ## Projection and map configuration
 
-Edit `src/main/resources/assets/campaignmap/campaign/campaign_map.json`, then rebuild. `worldMinX`, `worldMaxX`, `worldMinZ`, and `worldMaxZ` define the inclusive Minecraft-coordinate rectangle represented by the raster. `flipX` and `flipZ` explicitly control orientation. All world/map conversions go through `MapProjection`.
+Edit `src/main/resources/assets/campaignmap/campaign/campaign_map.json`, then rebuild. `worldMinX`, `worldMaxX`, `worldMinZ`, and `worldMaxZ` define the inclusive Minecraft-coordinate rectangle represented by the province image. `flipX` and `flipZ` explicitly control orientation. All world/map conversions go through `MapProjection`.
 
-The included `-200..199` bounds are demonstration defaults copied from the project brief. They are **not known to match the intended Minecraft world**. Set them to the actual WorldPainter/world bounds and set each flip only after comparing known landmarks. Raster resolution and world size are independent.
+The included `-200..199` bounds are demonstration defaults copied from the project brief. They are **not known to match the intended Minecraft world**. Set them to the actual WorldPainter/world bounds and set each flip only after comparing known landmarks. Image resolution and world size are independent.
 
 Each province entry has a stable resource ID, a mutable display name, and an exact RGB identifier:
 
@@ -24,7 +24,7 @@ Each province entry has a stable resource ID, a mutable display name, and an exa
 {"id": "campaignmap:province_0", "name": "Treeia", "rgb": [0, 127, 14]}
 ```
 
-Black is reserved as unassigned by `unassignedRgb`, unless a future configuration deliberately changes that value. Startup validation rejects duplicate IDs, duplicate colours, undefined raster colours, missing province pixels, missing images, and mismatched image dimensions.
+Black is reserved as unassigned by `unassignedRgb`, unless a future configuration deliberately changes that value. Startup validation rejects duplicate IDs, duplicate colours, undefined pixel colours, missing province pixels, missing images, and mismatched image dimensions.
 
 ## Commands
 

@@ -17,7 +17,7 @@ import java.util.*;
 
 public final class ProvinceRegistry {
     public static final String CONFIG_RESOURCE = "/assets/campaignmap/campaign/campaign_map.json";
-    public static final String RASTER_RESOURCE = "/assets/campaignmap/campaign/province_key.png";
+    public static final String PIXEL_MAP_RESOURCE = "/assets/campaignmap/campaign/province_key.png";
     public static final String FRONTEND_RESOURCE = "/assets/campaignmap/campaign/campaign_front.png";
     private static volatile ProvinceRegistry instance;
 
@@ -25,7 +25,7 @@ public final class ProvinceRegistry {
     private final Map<ResourceLocation, ProvinceDefinition> byId;
     private final Map<ResourceLocation, Set<ResourceLocation>> adjacency;
     private final Map<ResourceLocation, MapProjection.PixelPoint> labelPoints;
-    private final ProvinceRaster raster;
+    private final ProvincePixelMap pixelMap;
     private final MapProjection projection;
     private final int unassignedRgb;
 
@@ -33,14 +33,14 @@ public final class ProvinceRegistry {
                              Map<ResourceLocation, ProvinceDefinition> byId,
                              Map<ResourceLocation, Set<ResourceLocation>> adjacency,
                              Map<ResourceLocation, MapProjection.PixelPoint> labelPoints,
-                             ProvinceRaster raster, MapProjection projection, int unassignedRgb) {
+                             ProvincePixelMap pixelMap, MapProjection projection, int unassignedRgb) {
         this.byRgb = Map.copyOf(byRgb);
         this.byId = Map.copyOf(byId);
         Map<ResourceLocation, Set<ResourceLocation>> immutableAdjacency = new HashMap<>();
         adjacency.forEach((id, neighbours) -> immutableAdjacency.put(id, Set.copyOf(neighbours)));
         this.adjacency = Map.copyOf(immutableAdjacency);
         this.labelPoints = Map.copyOf(labelPoints);
-        this.raster = raster;
+        this.pixelMap = pixelMap;
         this.projection = projection;
         this.unassignedRgb = unassignedRgb;
     }
@@ -62,16 +62,16 @@ public final class ProvinceRegistry {
 
     private static ProvinceRegistry loadBundled() {
         try (InputStream configStream = requiredResource(CONFIG_RESOURCE);
-             InputStream rasterStream = requiredResource(RASTER_RESOURCE);
+             InputStream pixelMapStream = requiredResource(PIXEL_MAP_RESOURCE);
              InputStream frontendStream = requiredResource(FRONTEND_RESOURCE)) {
             Config config = new Gson().fromJson(new InputStreamReader(configStream, StandardCharsets.UTF_8), Config.class);
             if (config == null || config.projection == null || config.provinces == null) {
                 throw new JsonParseException("campaign_map.json is missing projection or provinces");
             }
-            ProvinceRaster raster = ProvinceRaster.read(rasterStream);
+            ProvincePixelMap pixelMap = ProvincePixelMap.read(pixelMapStream);
             BufferedImage frontend = ImageIO.read(frontendStream);
-            if (frontend == null || frontend.getWidth() != raster.width() || frontend.getHeight() != raster.height()) {
-                throw new IllegalStateException("Frontend map and province raster dimensions must match");
+            if (frontend == null || frontend.getWidth() != pixelMap.width() || frontend.getHeight() != pixelMap.height()) {
+                throw new IllegalStateException("Frontend map and province pixel-map dimensions must match");
             }
             Map<Integer, ProvinceDefinition> byRgb = new HashMap<>();
             Map<ResourceLocation, ProvinceDefinition> byId = new LinkedHashMap<>();
@@ -91,9 +91,9 @@ public final class ProvinceRegistry {
             Set<Integer> unknown = new TreeSet<>();
             Map<ResourceLocation, Set<ResourceLocation>> adjacency = new HashMap<>();
             byId.keySet().forEach(id -> adjacency.put(id, new HashSet<>()));
-            for (int y = 0; y < raster.height(); y++) {
-                for (int x = 0; x < raster.width(); x++) {
-                    int color = raster.rgbAt(x, y);
+            for (int y = 0; y < pixelMap.height(); y++) {
+                for (int x = 0; x < pixelMap.width(); x++) {
+                    int color = pixelMap.rgbAt(x, y);
                     ProvinceDefinition province = byRgb.get(color);
                     if (province == null) {
                         if (color != unassigned) unknown.add(color);
@@ -101,24 +101,25 @@ public final class ProvinceRegistry {
                     }
                     long[] sum = sums.get(province.id());
                     sum[0] += x; sum[1] += y; sum[2]++;
-                    if (x + 1 < raster.width()) connect(byRgb.get(raster.rgbAt(x + 1, y)), province, adjacency);
-                    if (y + 1 < raster.height()) connect(byRgb.get(raster.rgbAt(x, y + 1)), province, adjacency);
+                    if (x + 1 < pixelMap.width()) connect(byRgb.get(pixelMap.rgbAt(x + 1, y)), province, adjacency);
+                    if (y + 1 < pixelMap.height()) connect(byRgb.get(pixelMap.rgbAt(x, y + 1)), province, adjacency);
                 }
             }
-            if (!unknown.isEmpty()) throw new IllegalStateException("Province raster has undefined RGB values: " + unknown);
+            if (!unknown.isEmpty()) throw new IllegalStateException("Province pixel map has undefined RGB values: " + unknown);
             Map<ResourceLocation, MapProjection.PixelPoint> labels = new HashMap<>();
             for (ProvinceDefinition province : byId.values()) {
                 long[] sum = sums.get(province.id());
                 if (sum[2] == 0) throw new IllegalStateException("Province has no pixels: " + province.id());
                 int centerX = (int) (sum[0] / sum[2]);
                 int centerY = (int) (sum[1] / sum[2]);
-                labels.put(province.id(), nearestPixel(raster, province.rgb(), centerX, centerY));
+                labels.put(province.id(), nearestPixel(pixelMap, province.rgb(), centerX, centerY));
             }
             ProjectionJson p = config.projection;
             MapProjection projection = new MapProjection(p.worldMinX, p.worldMaxX, p.worldMinZ, p.worldMaxZ,
-                    p.flipX, p.flipZ, raster.width(), raster.height());
-            CampaignMapMod.LOGGER.info("Loaded {} provinces from {}x{} campaign raster", byId.size(), raster.width(), raster.height());
-            return new ProvinceRegistry(byRgb, byId, adjacency, labels, raster, projection, unassigned);
+                    p.flipX, p.flipZ, pixelMap.width(), pixelMap.height());
+            CampaignMapMod.LOGGER.info("Loaded {} provinces from {}x{} province pixel map",
+                    byId.size(), pixelMap.width(), pixelMap.height());
+            return new ProvinceRegistry(byRgb, byId, adjacency, labels, pixelMap, projection, unassigned);
         } catch (IOException | RuntimeException exception) {
             throw new IllegalStateException("Unable to load bundled campaign map", exception);
         }
@@ -144,13 +145,13 @@ public final class ProvinceRegistry {
         }
     }
 
-    private static MapProjection.PixelPoint nearestPixel(ProvinceRaster raster, int rgb, int centerX, int centerY) {
-        if (raster.rgbAt(centerX, centerY) == rgb) return new MapProjection.PixelPoint(centerX, centerY);
-        int maxRadius = Math.max(raster.width(), raster.height());
+    private static MapProjection.PixelPoint nearestPixel(ProvincePixelMap pixelMap, int rgb, int centerX, int centerY) {
+        if (pixelMap.rgbAt(centerX, centerY) == rgb) return new MapProjection.PixelPoint(centerX, centerY);
+        int maxRadius = Math.max(pixelMap.width(), pixelMap.height());
         for (int radius = 1; radius < maxRadius; radius++) {
-            for (int y = Math.max(0, centerY - radius); y <= Math.min(raster.height() - 1, centerY + radius); y++) {
-                for (int x = Math.max(0, centerX - radius); x <= Math.min(raster.width() - 1, centerX + radius); x++) {
-                    if ((Math.abs(x - centerX) == radius || Math.abs(y - centerY) == radius) && raster.rgbAt(x, y) == rgb) {
+            for (int y = Math.max(0, centerY - radius); y <= Math.min(pixelMap.height() - 1, centerY + radius); y++) {
+                for (int x = Math.max(0, centerX - radius); x <= Math.min(pixelMap.width() - 1, centerX + radius); x++) {
+                    if ((Math.abs(x - centerX) == radius || Math.abs(y - centerY) == radius) && pixelMap.rgbAt(x, y) == rgb) {
                         return new MapProjection.PixelPoint(x, y);
                     }
                 }
@@ -161,7 +162,7 @@ public final class ProvinceRegistry {
 
     @Nullable public ProvinceDefinition atPixel(int x, int y) {
         if (!projection.isPixelInsideMap(x, y)) return null;
-        return byRgb.get(raster.rgbAt(x, y));
+        return byRgb.get(pixelMap.rgbAt(x, y));
     }
 
     @Nullable public ProvinceDefinition atWorld(double x, double z) {
@@ -172,7 +173,7 @@ public final class ProvinceRegistry {
     public Collection<ProvinceDefinition> provinces() { return byId.values(); }
     public Set<ResourceLocation> neighbours(ResourceLocation id) { return adjacency.getOrDefault(id, Set.of()); }
     @Nullable public MapProjection.PixelPoint labelPoint(ResourceLocation id) { return labelPoints.get(id); }
-    public ProvinceRaster raster() { return raster; }
+    public ProvincePixelMap pixelMap() { return pixelMap; }
     public MapProjection projection() { return projection; }
     public int unassignedRgb() { return unassignedRgb; }
 

@@ -4,7 +4,7 @@ import com.lastpagans.campaignmap.CampaignMapMod;
 import com.lastpagans.campaignmap.api.ProvinceDefinition;
 import com.lastpagans.campaignmap.api.ProvinceOwnerState;
 import com.lastpagans.campaignmap.geography.MapProjection;
-import com.lastpagans.campaignmap.geography.ProvinceRaster;
+import com.lastpagans.campaignmap.geography.ProvincePixelMap;
 import com.lastpagans.campaignmap.geography.ProvinceRegistry;
 import com.mojang.blaze3d.platform.NativeImage;
 import com.mojang.blaze3d.systems.RenderSystem;
@@ -50,8 +50,8 @@ public final class CampaignMapScreen extends Screen {
         if (initialLayout) {
             int availableWidth = Math.max(64, width - PANEL_WIDTH - 32);
             int availableHeight = Math.max(64, height - 32);
-            scale = Math.min(availableWidth / (double) registry.raster().width(),
-                    availableHeight / (double) registry.raster().height());
+            scale = Math.min(availableWidth / (double) registry.pixelMap().width(),
+                    availableHeight / (double) registry.pixelMap().height());
             scale = Math.max(0.25, Math.min(4.0, scale));
             initialLayout = false;
         }
@@ -62,7 +62,7 @@ public final class CampaignMapScreen extends Screen {
             overlayLocation = null;
             overlayTexture = null;
         }
-        NativeImage pixels = new NativeImage(registry.raster().width(), registry.raster().height(), true);
+        NativeImage pixels = new NativeImage(registry.pixelMap().width(), registry.pixelMap().height(), true);
         overlayTexture = new DynamicTexture(pixels);
         overlayLocation = minecraft.getTextureManager().register("campaignmap/overlay", overlayTexture);
         clampTextureToSingleImage(minecraft.getTextureManager().getTexture(FRONTEND));
@@ -90,8 +90,8 @@ public final class CampaignMapScreen extends Screen {
     }
 
     private void renderMapTextures(GuiGraphics graphics, int drawX, int drawY) {
-        int mapWidth = registry.raster().width();
-        int mapHeight = registry.raster().height();
+        int mapWidth = registry.pixelMap().width();
+        int mapHeight = registry.pixelMap().height();
         int drawWidth = Math.max(1, (int) Math.round(mapWidth * scale));
         int drawHeight = Math.max(1, (int) Math.round(mapHeight * scale));
 
@@ -185,9 +185,9 @@ public final class CampaignMapScreen extends Screen {
     private void rebuildOverlay() {
         NativeImage image = overlayTexture == null ? null : overlayTexture.getPixels();
         if (image == null) return;
-        ProvinceRaster raster = registry.raster();
-        for (int y = 0; y < raster.height(); y++) {
-            for (int x = 0; x < raster.width(); x++) {
+        ProvincePixelMap pixelMap = registry.pixelMap();
+        for (int y = 0; y < pixelMap.height(); y++) {
+            for (int x = 0; x < pixelMap.width(); x++) {
                 ProvinceDefinition province = registry.atPixel(x, y);
                 int color = 0;
                 if (province != null) {
@@ -239,11 +239,11 @@ public final class CampaignMapScreen extends Screen {
 
     private int mapDrawX() {
         int viewportWidth = Math.max(1, width - PANEL_WIDTH - 16);
-        return (int) Math.round(8 + viewportWidth / 2.0 - registry.raster().width() * scale / 2.0 + panX);
+        return (int) Math.round(8 + viewportWidth / 2.0 - registry.pixelMap().width() * scale / 2.0 + panX);
     }
 
     private int mapDrawY() {
-        return (int) Math.round(height / 2.0 - registry.raster().height() * scale / 2.0 + panY);
+        return (int) Math.round(height / 2.0 - registry.pixelMap().height() * scale / 2.0 + panY);
     }
 
     @Override
@@ -283,8 +283,8 @@ public final class CampaignMapScreen extends Screen {
         double mapPixelY = (mouseY - mapDrawY()) / oldScale;
         scale = Math.max(0.25, Math.min(8.0, scale * (amount > 0 ? 1.2 : 1.0 / 1.2)));
         int viewportWidth = Math.max(1, width - PANEL_WIDTH - 16);
-        panX = mouseX - (8 + viewportWidth / 2.0 - registry.raster().width() * scale / 2.0) - mapPixelX * scale;
-        panY = mouseY - (height / 2.0 - registry.raster().height() * scale / 2.0) - mapPixelY * scale;
+        panX = mouseX - (8 + viewportWidth / 2.0 - registry.pixelMap().width() * scale / 2.0) - mapPixelX * scale;
+        panY = mouseY - (height / 2.0 - registry.pixelMap().height() * scale / 2.0) - mapPixelY * scale;
         return true;
     }
 
