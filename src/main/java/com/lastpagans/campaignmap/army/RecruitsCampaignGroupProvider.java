@@ -16,6 +16,9 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.world.entity.EntityType;
+import net.minecraftforge.fml.ModList;
+
+import java.lang.reflect.Method;
 
 /** Optional adapter over Recruits' authoritative persistent group records. */
 public final class RecruitsCampaignGroupProvider implements CampaignGroupProvider {
@@ -71,6 +74,7 @@ public final class RecruitsCampaignGroupProvider implements CampaignGroupProvide
             place(level, entity, anchor, index);
             index++;
         }
+        resetTacticalFormation(level, groupId, anchor, group.getPlayerUUID());
     }
 
     @Override
@@ -141,5 +145,44 @@ public final class RecruitsCampaignGroupProvider implements CampaignGroupProvide
         double y = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
                 net.minecraft.util.Mth.floor(x), net.minecraft.util.Mth.floor(z));
         entity.teleportTo(x, y, z);
+        if (entity instanceof AbstractRecruitEntity recruit) {
+            recruit.getNavigation().stop();
+            recruit.setTarget(null);
+            recruit.clearMovePos();
+            recruit.setShouldMovePos(false);
+            recruit.setHoldPos(recruit.position());
+            recruit.setFollowState(2);
+            recruit.setDeltaMovement(0.0D, recruit.getDeltaMovement().y, 0.0D);
+        }
+    }
+
+    /** Retarget the optional RTS runtime so it cannot steer recruits back to the pre-campaign anchor. */
+    private static void resetTacticalFormation(ServerLevel level, UUID groupId, Vec3 anchor, UUID ownerId) {
+        if (!ModList.get().isLoaded("recruits_rts_camera")) return;
+        try {
+            Class<?> runtime = Class.forName("ee.lastpagans.recruitsrtscamera.formation.FormationRuntime");
+            Method setCenter = runtime.getMethod("setFormationCenter", UUID.class, Vec3.class);
+            Method halt = runtime.getMethod("haltFormation", UUID.class);
+            setCenter.invoke(null, groupId, anchor);
+            halt.invoke(null, groupId);
+
+            Class<?> movement = Class.forName("ee.lastpagans.recruitsrtscamera.movement.RTSMovementBoostManager");
+            movement.getMethod("cancelForcedOrders", java.util.Collection.class).invoke(null, List.of(groupId));
+
+            Class<?> attacks = Class.forName("ee.lastpagans.recruitsrtscamera.combat.RTSGroupAttackManager");
+            attacks.getMethod("cancel", java.util.Collection.class).invoke(null, List.of(groupId));
+
+            net.minecraft.server.level.ServerPlayer owner = level.getServer().getPlayerList().getPlayer(ownerId);
+            if (owner != null) {
+                Class<?> routes = Class.forName("ee.lastpagans.recruitsrtscamera.network.RouteManager");
+                routes.getMethod("cancel", net.minecraft.server.level.ServerPlayer.class, List.class)
+                        .invoke(null, owner, List.of(groupId));
+            }
+        } catch (ClassNotFoundException | NoSuchMethodException | LinkageError ignored) {
+            // RTS is optional and older builds may not expose the stable formation API.
+        } catch (ReflectiveOperationException | RuntimeException error) {
+            com.lastpagans.campaignmap.CampaignMapMod.LOGGER.warn(
+                    "Could not reset the RTS formation for deployed group {}", groupId, error);
+        }
     }
 }

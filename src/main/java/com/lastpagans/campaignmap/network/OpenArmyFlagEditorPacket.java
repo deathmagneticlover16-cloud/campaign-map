@@ -1,6 +1,6 @@
 package com.lastpagans.campaignmap.network;
 
-import com.lastpagans.campaignmap.client.army.CampaignFlagChooserScreen;
+import com.lastpagans.campaignmap.client.army.CampaignFlagChooserEntry;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.fml.DistExecutor;
@@ -13,7 +13,7 @@ public record OpenArmyFlagEditorPacket(UUID armyId) {
     public static OpenArmyFlagEditorPacket decode(FriendlyByteBuf buffer) { return new OpenArmyFlagEditorPacket(buffer.readUUID()); }
     public static void handle(OpenArmyFlagEditorPacket packet, Supplier<NetworkEvent.Context> supplier) {
         supplier.get().enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
-                () -> () -> CampaignFlagChooserScreen.open(packet.armyId)));
+                () -> () -> CampaignFlagChooserEntry.open(packet.armyId)));
         supplier.get().setPacketHandled(true);
     }
 }

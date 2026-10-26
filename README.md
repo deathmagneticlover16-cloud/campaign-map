@@ -43,7 +43,7 @@ Mutation commands require permission level 2. Ownership and control are world Sa
 
 Army commands are available under `/campaignmap army`: `list`, `create`, `info`, `rename`, `addgroup`, `removegroup`, `move`, and `delete`. Army records have their own UUIDs and store only campaign state and Recruits group UUID references. Recruits remains the authority for groups and soldiers, and one group can belong to only one campaign army.
 
-Player-facing customization uses army names: `/map rename "Army Name" New Name` and `/map setflag "Army Name"`. The latter opens an Immersive Paintings catalog and stores the chosen painting separately from Recruits group flags.
+Player-facing customization uses army names: `/map rename "Army Name" New Name` and `/map setflag "Army Name"`. The latter opens Immersive Paintings' actual browser and stores the chosen painting separately from Recruits group flags.
 
 ## External mod API
 
@@ -74,4 +74,4 @@ Use Java 17 or a Gradle toolchain capable of obtaining Java 17:
 ./gradlew clean test build
 ```
 
-The distributable JAR is written to `build/libs/campaignmap-0.1.0.jar`.
+The distributable JAR is written to `build/libs/campaignmap-0.1.1.jar`.
