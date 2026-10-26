@@ -67,7 +67,8 @@ public final class CampaignMapMod {
             armySyncTicker = 0;
         }
         changed.stream()
-                .filter(army -> periodicSync || army.state() == ArmyState.STATIONARY)
+                .filter(army -> periodicSync || army.movementPath().isEmpty()
+                        || army.state() == ArmyState.STATIONARY)
                 .forEach(CampaignNetwork::sendArmyUpdate);
     }
 

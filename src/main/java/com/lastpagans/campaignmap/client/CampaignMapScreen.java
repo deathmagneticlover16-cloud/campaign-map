@@ -16,6 +16,8 @@ import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.renderer.texture.AbstractTexture;
 import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.network.chat.Component;
@@ -30,7 +32,7 @@ import java.util.Objects;
 public final class CampaignMapScreen extends Screen {
     private static final ResourceLocation FRONTEND = new ResourceLocation(CampaignMapMod.MOD_ID,
             "campaign/campaign_front.png");
-    private static final int PANEL_WIDTH = 220;
+    private static final int PANEL_WIDTH = 260;
     private final ProvinceRegistry registry = ProvinceRegistry.get();
     private DynamicTexture overlayTexture;
     private ResourceLocation overlayLocation;
@@ -42,6 +44,7 @@ public final class CampaignMapScreen extends Screen {
     private double dragDistance;
     private boolean politicalMode = true;
     private boolean armyManagementMode;
+    private int groupListOffset;
     private final java.util.Set<java.util.UUID> pendingGroups = new java.util.LinkedHashSet<>();
     private long previousFrameNanos;
     private double animationSeconds;
@@ -52,6 +55,12 @@ public final class CampaignMapScreen extends Screen {
     @Nullable private java.util.UUID hoveredArmy;
     @Nullable private ResourceLocation renderedSelection;
     @Nullable private ResourceLocation renderedHover;
+    private EditBox armyNameInput;
+    private Button renameButton;
+    private Button flagButton;
+    private Button armyActionButton;
+    private Button createArmyButton;
+    @Nullable private java.util.UUID editedArmy;
 
     public CampaignMapScreen() {
         super(Component.translatable("screen.campaignmap.title"));
@@ -77,6 +86,19 @@ public final class CampaignMapScreen extends Screen {
         clampTextureToSingleImage(overlayTexture);
         rebuildOverlay();
         CampaignNetwork.requestGroupCatalog();
+        int left = width - PANEL_WIDTH;
+        armyNameInput = new EditBox(font, left + 14, 58, PANEL_WIDTH - 28, 20, Component.literal("Army name"));
+        armyNameInput.setMaxLength(64);
+        addRenderableWidget(armyNameInput);
+        renameButton = addRenderableWidget(Button.builder(Component.literal("RENAME"), button -> renameSelectedArmy())
+                .bounds(left + 14, 82, 108, 20).build());
+        flagButton = addRenderableWidget(Button.builder(Component.literal("CHOOSE FLAG"), button -> chooseSelectedFlag())
+                .bounds(left + 128, 82, 118, 20).build());
+        armyActionButton = addRenderableWidget(Button.builder(Component.literal("PREPARE TO MOVE"), button -> runArmyAction())
+                .bounds(left + 14, height - 42, PANEL_WIDTH - 28, 24).build());
+        createArmyButton = addRenderableWidget(Button.builder(Component.literal("CREATE ARMY"), button -> createSelectedArmy())
+                .bounds(left + 14, height - 42, PANEL_WIDTH - 28, 24).build());
+        hideArmyControls();
     }
 
     @Override
@@ -100,7 +122,8 @@ public final class CampaignMapScreen extends Screen {
         bannerRenderer.render(graphics, camera, selectedArmy, localPlayer, animationSeconds);
         graphics.disableScissor();
         renderPanel(graphics);
-        graphics.drawString(font, Component.literal("Wheel: zoom  •  Right-drag: pan/order  •  Middle-drag: orbit  •  A: armies  •  P: mode"),
+        syncArmyControls();
+        graphics.drawString(font, Component.literal("Wheel: zoom  •  Right-click: order  •  Right-drag: pan  •  Middle-drag: orbit  •  A: armies"),
                 12, height - 17, 0xFFBBC2CB, false);
         super.render(graphics, mouseX, mouseY, partialTick);
     }
@@ -178,8 +201,9 @@ public final class CampaignMapScreen extends Screen {
         ClientArmyCache.entries().forEach(entry -> assigned.addAll(entry.snapshot().groupIds()));
         int y = 91;
         int shown = 0;
-        for (var group : ClientGroupCatalog.groups()) {
-            if (shown >= 7) break;
+        int maxRows = Math.max(1, (height - 160) / 22);
+        for (var group : ClientGroupCatalog.groups().stream().skip(groupListOffset).toList()) {
+            if (shown >= maxRows) break;
             boolean unavailable = assigned.contains(group.groupId());
             boolean selected = pendingGroups.contains(group.groupId());
             int background = unavailable ? 0x55343434 : selected ? 0xAA31596A : 0x88303842;
@@ -190,16 +214,12 @@ public final class CampaignMapScreen extends Screen {
             y += 22;
             shown++;
         }
+        if (ClientGroupCatalog.groups().size() > maxRows)
+            graphics.drawString(font, "Wheel to browse groups", left + 14, height - 62, 0xFF8F98A3, false);
         if (ClientGroupCatalog.groups().isEmpty()) {
             graphics.drawWordWrap(font, Component.literal("No owned Recruits groups are available. The Recruits mod must be installed on the server."),
                     left + 14, y, PANEL_WIDTH - 28, 0xFFD6D8DC);
         }
-        int buttonTop = height - 66;
-        int buttonColor = pendingGroups.isEmpty() ? 0xFF3B3F44 : 0xFF8D744B;
-        graphics.fill(left + 14, buttonTop, width - 14, buttonTop + 22, buttonColor);
-        String text = pendingGroups.isEmpty() ? "SELECT GROUPS" : "CREATE ARMY (" + pendingGroups.size() + ")";
-        graphics.drawCenteredString(font, text, left + PANEL_WIDTH / 2, buttonTop + 7,
-                pendingGroups.isEmpty() ? 0xFF898E94 : 0xFFFFFFFF);
     }
 
     private boolean handleArmyPanelClick(double mouseX, double mouseY) {
@@ -209,8 +229,9 @@ public final class CampaignMapScreen extends Screen {
         ClientArmyCache.entries().forEach(entry -> assigned.addAll(entry.snapshot().groupIds()));
         int y = 91;
         int shown = 0;
-        for (var group : ClientGroupCatalog.groups()) {
-            if (shown >= 7) break;
+        int maxRows = Math.max(1, (height - 160) / 22);
+        for (var group : ClientGroupCatalog.groups().stream().skip(groupListOffset).toList()) {
+            if (shown >= maxRows) break;
             if (mouseY >= y - 3 && mouseY < y + 18 && !assigned.contains(group.groupId())) {
                 if (!pendingGroups.add(group.groupId())) pendingGroups.remove(group.groupId());
                 return true;
@@ -218,39 +239,31 @@ public final class CampaignMapScreen extends Screen {
             y += 22;
             shown++;
         }
-        if (mouseY >= height - 66 && mouseY < height - 44 && !pendingGroups.isEmpty()) {
-            String name = ClientGroupCatalog.groups().stream().filter(group -> pendingGroups.contains(group.groupId()))
-                    .findFirst().map(group -> group.name() + " Army").orElse("New Army");
-            CampaignNetwork.requestArmyCreation(name, java.util.List.copyOf(pendingGroups));
-            pendingGroups.clear();
-            armyManagementMode = false;
-            return true;
-        }
         return true;
     }
 
     private void renderArmyPanel(GuiGraphics graphics, int left, CampaignArmySnapshot army) {
-        int y = 60;
-        graphics.drawString(font, army.armyName().toUpperCase(), left + 14, y, 0xFFFFDDA0, false);
-        y += 22;
-        y = panelLine(graphics, left, y, "State", stateLabel(army.state()));
-        y = panelLine(graphics, left, y, "Commander", playerName(army.commanderId()));
-        y = panelLine(graphics, left, y, "Soldiers", Integer.toString(army.totalSoldiers()));
-        y = panelLine(graphics, left, y, "Groups", groupNames(army));
-        y = panelLine(graphics, left, y, "Food", Integer.toString(army.foodSupplies()));
-        y = panelLine(graphics, left, y, "Fatigue", String.format("%.1f", army.fatigue()));
-        panelLine(graphics, left, y, "Position", String.format("%.1f, %.1f",
-                army.campaignPosition().x, army.campaignPosition().z));
-        if (selectedArmy != null) {
-            boolean ready = army.state() == com.lastpagans.campaignmap.api.army.ArmyState.MOVING;
-            boolean transitioning = army.state() == com.lastpagans.campaignmap.api.army.ArmyState.RETREATING
-                    || army.state() == com.lastpagans.campaignmap.api.army.ArmyState.DEPLOYING;
-            String action = ready ? "RIGHT-CLICK MAP TO MOVE"
-                    : transitioning ? transitionText(army) : "PREPARE TO MOVE";
-            graphics.fill(left + 14, height - 66, width - 14, height - 44,
-                    ready ? 0xFF31596A : transitioning ? 0xFF4A4D52 : 0xFF8D744B);
-            graphics.drawCenteredString(font, action,
-                    left + PANEL_WIDTH / 2, height - 59, 0xFFFFFFFF);
+        if (selectedArmy == null) {
+            graphics.drawString(font, font.plainSubstrByWidth(army.armyName().toUpperCase(), PANEL_WIDTH - 28),
+                    left + 14, 64, 0xFFFFDDA0, false);
+        }
+        int y = 112;
+        graphics.drawString(font, "ARMY STATUS", left + 14, y, 0xFF8D744B, false);
+        y += 17;
+        y = statRow(graphics, left, y, "State", stateLabel(army));
+        y = statRow(graphics, left, y, "Commander", playerName(army.commanderId()));
+        y = statRow(graphics, left, y, "Strength", army.totalSoldiers() + " soldiers");
+        y = statRow(graphics, left, y, "Groups", Integer.toString(army.groupIds().size()));
+        y = statRow(graphics, left, y, "Supplies", Integer.toString(army.foodSupplies()));
+        y = statRow(graphics, left, y, "Fatigue", String.format("%.1f", army.fatigue()));
+        y += 7;
+        graphics.drawString(font, "CONSTITUENT GROUPS", left + 14, y, 0xFF8D744B, false);
+        y += 16;
+        for (String group : groupNameList(army)) {
+            if (y > height - 72) break;
+            graphics.fill(left + 12, y - 3, width - 12, y + 14, 0x55303842);
+            graphics.drawString(font, font.plainSubstrByWidth(group, PANEL_WIDTH - 36), left + 17, y, 0xFFE7E9EC, false);
+            y += 20;
         }
     }
 
@@ -261,10 +274,10 @@ public final class CampaignMapScreen extends Screen {
         return info == null ? "Offline commander" : info.getProfile().getName();
     }
 
-    private static String stateLabel(com.lastpagans.campaignmap.api.army.ArmyState state) {
-        return switch (state) {
+    private static String stateLabel(CampaignArmySnapshot army) {
+        return switch (army.state()) {
             case RETREATING -> "Preparing to move";
-            case MOVING -> "Movement mode";
+            case MOVING -> army.movementPath().isEmpty() ? "Awaiting orders" : "Marching";
             case DEPLOYING -> "Deploying groups";
             case DEPLOYED -> "Deployed";
             case STATIONARY -> "Stationary";
@@ -277,12 +290,90 @@ public final class CampaignMapScreen extends Screen {
                 ? "PACKING" : "DEPLOYING") + " • " + seconds + "s";
     }
 
-    private String groupNames(CampaignArmySnapshot army) {
+    private void syncArmyControls() {
+        hideArmyControls();
+        createArmyButton.visible = armyManagementMode;
+        createArmyButton.active = !pendingGroups.isEmpty();
+        createArmyButton.setMessage(Component.literal(pendingGroups.isEmpty()
+                ? "SELECT GROUPS" : "CREATE ARMY (" + pendingGroups.size() + ")"));
+        if (armyManagementMode || selectedArmy == null || minecraft.player == null) return;
+        ClientArmyCache.Entry entry = ClientArmyCache.get(selectedArmy).orElse(null);
+        if (entry == null || !entry.snapshot().ownerId().equals(minecraft.player.getUUID())) return;
+        CampaignArmySnapshot army = entry.snapshot();
+        armyNameInput.visible = true;
+        renameButton.visible = true;
+        flagButton.visible = true;
+        armyActionButton.visible = true;
+        if (!army.armyId().equals(editedArmy)) {
+            editedArmy = army.armyId();
+            armyNameInput.setValue(army.armyName());
+        }
+        switch (army.state()) {
+            case DEPLOYED, STATIONARY -> {
+                armyActionButton.active = true;
+                armyActionButton.setMessage(Component.literal("PREPARE TO MOVE"));
+            }
+            case RETREATING, DEPLOYING -> {
+                armyActionButton.active = false;
+                armyActionButton.setMessage(Component.literal(transitionText(army)));
+            }
+            case MOVING -> {
+                armyActionButton.active = true;
+                armyActionButton.setMessage(Component.literal(army.movementPath().isEmpty()
+                        ? "DEPLOY HERE" : "HALT AND DEPLOY HERE"));
+            }
+        }
+    }
+
+    private void hideArmyControls() {
+        if (armyNameInput != null) armyNameInput.visible = false;
+        if (renameButton != null) renameButton.visible = false;
+        if (flagButton != null) flagButton.visible = false;
+        if (armyActionButton != null) armyActionButton.visible = false;
+        if (createArmyButton != null) createArmyButton.visible = false;
+    }
+
+    private void renameSelectedArmy() {
+        if (selectedArmy != null && !armyNameInput.getValue().isBlank())
+            CampaignNetwork.requestArmyRename(selectedArmy, armyNameInput.getValue());
+    }
+
+    private void chooseSelectedFlag() {
+        if (selectedArmy != null) CampaignNetwork.requestFlagEditor(selectedArmy);
+    }
+
+    private void runArmyAction() {
+        if (selectedArmy == null) return;
+        ClientArmyCache.get(selectedArmy).ifPresent(entry -> {
+            switch (entry.snapshot().state()) {
+                case DEPLOYED, STATIONARY -> CampaignNetwork.requestMovementMode(selectedArmy);
+                case MOVING -> CampaignNetwork.requestDeployment(selectedArmy);
+                default -> { }
+            }
+        });
+    }
+
+    private void createSelectedArmy() {
+        if (pendingGroups.isEmpty()) return;
+        String name = ClientGroupCatalog.groups().stream().filter(group -> pendingGroups.contains(group.groupId()))
+                .findFirst().map(group -> group.name() + " Army").orElse("New Army");
+        CampaignNetwork.requestArmyCreation(name, java.util.List.copyOf(pendingGroups));
+        pendingGroups.clear();
+        armyManagementMode = false;
+    }
+
+    private java.util.List<String> groupNameList(CampaignArmySnapshot army) {
         return army.groupIds().stream().map(id -> ClientGroupCatalog.groups().stream()
                 .filter(group -> group.groupId().equals(id))
                 .map(group -> group.name() + " (" + group.soldierCount() + ")")
                 .findFirst().orElse("Group (offline)"))
-                .collect(java.util.stream.Collectors.joining(", "));
+                .toList();
+    }
+
+    private int statRow(GuiGraphics graphics, int left, int y, String label, String value) {
+        graphics.drawString(font, label, left + 14, y, 0xFF9EA7B3, false);
+        graphics.drawString(font, font.plainSubstrByWidth(value, 142), left + 102, y, 0xFFF1F2F3, false);
+        return y + 17;
     }
 
     private int panelLine(GuiGraphics graphics, int left, int y, String label, String value) {
@@ -375,16 +466,9 @@ public final class CampaignMapScreen extends Screen {
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT && super.mouseClicked(mouseX, mouseY, button)) return true;
         if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
             if (handleArmyPanelClick(mouseX, mouseY)) return true;
-            if (selectedArmy != null && mouseX >= width - PANEL_WIDTH + 14 && mouseY >= height - 66 && mouseY < height - 44) {
-                ClientArmyCache.get(selectedArmy).ifPresent(entry -> {
-                    if (entry.snapshot().state() == com.lastpagans.campaignmap.api.army.ArmyState.DEPLOYED
-                            || entry.snapshot().state() == com.lastpagans.campaignmap.api.army.ArmyState.STATIONARY)
-                        CampaignNetwork.requestMovementMode(selectedArmy);
-                });
-                return true;
-            }
             if (hoveredArmy != null) {
                 selectedArmy = hoveredArmy;
                 selectedProvince = null;
@@ -405,7 +489,7 @@ public final class CampaignMapScreen extends Screen {
             dragDistance = 0.0;
             return true;
         }
-        return super.mouseClicked(mouseX, mouseY, button);
+        return false;
     }
 
     @Override
@@ -439,6 +523,12 @@ public final class CampaignMapScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double amount) {
+        if (armyManagementMode && mouseX >= width - PANEL_WIDTH) {
+            int maxRows = Math.max(1, (height - 160) / 22);
+            int maxOffset = Math.max(0, ClientGroupCatalog.groups().size() - maxRows);
+            groupListOffset = Math.max(0, Math.min(maxOffset, groupListOffset + (amount < 0 ? 1 : -1)));
+            return true;
+        }
         camera.zoom(amount);
         return true;
     }
@@ -455,9 +545,20 @@ public final class CampaignMapScreen extends Screen {
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (armyNameInput != null && armyNameInput.visible && armyNameInput.isFocused()) {
+            if (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
+                renameSelectedArmy();
+                armyNameInput.setFocused(false);
+                return true;
+            }
+            return super.keyPressed(keyCode, scanCode, modifiers);
+        }
         if (keyCode == GLFW.GLFW_KEY_A) {
             armyManagementMode = !armyManagementMode;
-            if (armyManagementMode) CampaignNetwork.requestGroupCatalog();
+            if (armyManagementMode) {
+                groupListOffset = 0;
+                CampaignNetwork.requestGroupCatalog();
+            }
             return true;
         }
         if (keyCode == GLFW.GLFW_KEY_P) {

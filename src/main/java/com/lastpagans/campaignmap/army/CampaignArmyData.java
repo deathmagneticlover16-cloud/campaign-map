@@ -155,8 +155,6 @@ public final class CampaignArmyData extends SavedData {
                 continue;
             }
             if (army.state == ArmyState.DEPLOYING) {
-                if (level.getGameTime() % 20L == 0L)
-                    army.groupIds.forEach(group -> mergePacked(army, group, CampaignGroupProviders.pack(level, group)));
                 if (--army.transitionTicks <= 0) {
                     army.transitionTicks = 0;
                     army.state = ArmyState.DEPLOYED;
@@ -164,9 +162,6 @@ public final class CampaignArmyData extends SavedData {
                 }
                 changed.add(army.snapshot(level));
                 continue;
-            }
-            if (army.state == ArmyState.MOVING && level.getGameTime() % 20L == 0L) {
-                army.groupIds.forEach(group -> mergePacked(army, group, CampaignGroupProviders.pack(level, group)));
             }
             if (army.state != ArmyState.MOVING || army.path.isEmpty()) continue;
             Vec3 destination = army.path.get(0);
@@ -177,10 +172,6 @@ public final class CampaignArmyData extends SavedData {
             if (remaining <= step || remaining < 1.0e-5) {
                 army.position = destination;
                 army.path.remove(0);
-                if (army.path.isEmpty()) {
-                    army.state = ArmyState.DEPLOYING;
-                    army.transitionTicks = army.transitionTicksTotal = deploymentTicks(army.groupIds.size());
-                }
             } else {
                 Vec3 horizontal = new Vec3(delta.x, 0.0, delta.z).normalize();
                 army.position = army.position.add(horizontal.scale(step));
@@ -190,6 +181,16 @@ public final class CampaignArmyData extends SavedData {
         }
         if (!changed.isEmpty()) setDirty();
         return changed;
+    }
+
+    public boolean beginDeployment(UUID armyId) {
+        CampaignArmy army = armies.get(armyId);
+        if (army == null || army.state != ArmyState.MOVING) return false;
+        army.path.clear();
+        army.state = ArmyState.DEPLOYING;
+        army.transitionTicks = army.transitionTicksTotal = deploymentTicks(army.groupIds.size());
+        setDirty();
+        return true;
     }
 
     private static int deploymentTicks(int groups) {

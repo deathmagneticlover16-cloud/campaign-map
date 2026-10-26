@@ -8,7 +8,7 @@ Forge 1.20.1 mod providing an authoritative province system, a smooth 3D campaig
 - Left-click a province to select it.
 - Use the mouse wheel to zoom, right-drag to pan, and middle-drag to angle the camera.
 - Select an army banner and right-click the map to issue a server-authoritative movement order.
-- Select an army and press **Prepare to Move** first. Packing and redeployment take 5–30 seconds based on group count; the real loaded Recruits are placed at separated group anchors when deployment completes.
+- Select an army and press **Prepare to Move** first. Packing takes 5–30 seconds based on group count. Movement mode then stays active across any number of right-click orders until **Deploy Here** is pressed; deployment has its own 5–30 second timer before the real Recruits return at separated group anchors.
 - Press **A** to open army management and create an army from your available Recruits groups.
 - Press **P** inside the map to toggle the political tint layer.
 - Press **Esc** to close the map.
