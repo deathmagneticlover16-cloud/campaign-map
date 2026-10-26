@@ -25,7 +25,7 @@ import java.util.List;
 import java.util.function.Supplier;
 
 public final class CampaignNetwork {
-    private static final String PROTOCOL = "2";
+    private static final String PROTOCOL = "3";
     private static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(CampaignMapMod.MOD_ID, "main"), () -> PROTOCOL, PROTOCOL::equals, PROTOCOL::equals);
 
@@ -57,6 +57,18 @@ public final class CampaignNetwork {
                 .decoder(ArmyCreateRequestPacket::decode)
                 .consumerMainThread(CampaignNetwork::handleArmyCreate)
                 .add();
+        CHANNEL.messageBuilder(OpenArmyFlagEditorPacket.class, 5, NetworkDirection.PLAY_TO_CLIENT)
+                .encoder(OpenArmyFlagEditorPacket::encode).decoder(OpenArmyFlagEditorPacket::decode)
+                .consumerMainThread(OpenArmyFlagEditorPacket::handle).add();
+        CHANNEL.messageBuilder(SetArmyFlagPacket.class, 6, NetworkDirection.PLAY_TO_SERVER)
+                .encoder(SetArmyFlagPacket::encode).decoder(SetArmyFlagPacket::decode)
+                .consumerMainThread(CampaignNetwork::handleArmyFlag).add();
+        CHANNEL.messageBuilder(ArmyMovementModeRequestPacket.class, 7, NetworkDirection.PLAY_TO_SERVER)
+                .encoder(ArmyMovementModeRequestPacket::encode).decoder(ArmyMovementModeRequestPacket::decode)
+                .consumerMainThread(CampaignNetwork::handleMovementMode).add();
+        CHANNEL.messageBuilder(GroupCatalogRequestPacket.class, 8, NetworkDirection.PLAY_TO_SERVER)
+                .encoder(GroupCatalogRequestPacket::encode).decoder(GroupCatalogRequestPacket::decode)
+                .consumerMainThread(CampaignNetwork::handleGroupCatalogRequest).add();
     }
 
     private static void handleOwnership(OwnershipSyncPacket packet, Supplier<NetworkEvent.Context> contextSupplier) {
@@ -113,9 +125,41 @@ public final class CampaignNetwork {
                 for (java.util.UUID group : validGroups) {
                     data.addGroup(player.serverLevel(), army.armyId(), player.getUUID(), group, false);
                 }
+                data.deployNow(player.serverLevel(), army.armyId());
                 data.snapshot(player.serverLevel(), army.armyId()).ifPresent(CampaignNetwork::sendArmyUpdate);
             }
         }
+        context.setPacketHandled(true);
+    }
+
+    private static void handleArmyFlag(SetArmyFlagPacket packet, Supplier<NetworkEvent.Context> supplier) {
+        NetworkEvent.Context context = supplier.get();
+        ServerPlayer player = context.getSender();
+        ResourceLocation painting = ResourceLocation.tryParse(packet.paintingId());
+        if (player != null && painting != null && Double.isFinite(packet.aspect())) {
+            CampaignArmyData data = CampaignArmyData.get(player.serverLevel());
+            if (data.owns(packet.armyId(), player.getUUID()) && data.setFlag(packet.armyId(), painting, packet.aspect()))
+                data.snapshot(player.serverLevel(), packet.armyId()).ifPresent(CampaignNetwork::sendArmyUpdate);
+        }
+        context.setPacketHandled(true);
+    }
+
+    private static void handleMovementMode(ArmyMovementModeRequestPacket packet, Supplier<NetworkEvent.Context> supplier) {
+        NetworkEvent.Context context = supplier.get();
+        ServerPlayer player = context.getSender();
+        if (player != null) {
+            CampaignArmyData data = CampaignArmyData.get(player.serverLevel());
+            if (data.owns(packet.armyId(), player.getUUID()) && data.beginMovementMode(packet.armyId()))
+                data.snapshot(player.serverLevel(), packet.armyId()).ifPresent(CampaignNetwork::sendArmyUpdate);
+        }
+        context.setPacketHandled(true);
+    }
+
+    private static void handleGroupCatalogRequest(GroupCatalogRequestPacket packet, Supplier<NetworkEvent.Context> supplier) {
+        NetworkEvent.Context context = supplier.get();
+        ServerPlayer player = context.getSender();
+        if (player != null) CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new GroupCatalogSyncPacket(
+                CampaignGroupProviders.ownedGroups(player.serverLevel(), player.getUUID())));
         context.setPacketHandled(true);
     }
 
@@ -146,5 +190,18 @@ public final class CampaignNetwork {
 
     public static void requestArmyCreation(String name, List<java.util.UUID> groupIds) {
         CHANNEL.sendToServer(new ArmyCreateRequestPacket(name, List.copyOf(groupIds)));
+    }
+
+    public static void requestArmyFlag(java.util.UUID armyId, ResourceLocation paintingId, double aspect) {
+        CHANNEL.sendToServer(new SetArmyFlagPacket(armyId, paintingId.toString(), aspect));
+    }
+
+    public static void requestMovementMode(java.util.UUID armyId) {
+        CHANNEL.sendToServer(new ArmyMovementModeRequestPacket(armyId));
+    }
+    public static void requestGroupCatalog() { CHANNEL.sendToServer(new GroupCatalogRequestPacket()); }
+
+    public static void openArmyFlagEditor(ServerPlayer player, java.util.UUID armyId) {
+        CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new OpenArmyFlagEditorPacket(armyId));
     }
 }

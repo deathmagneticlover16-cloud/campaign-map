@@ -8,6 +8,7 @@ Forge 1.20.1 mod providing an authoritative province system, a smooth 3D campaig
 - Left-click a province to select it.
 - Use the mouse wheel to zoom, right-drag to pan, and middle-drag to angle the camera.
 - Select an army banner and right-click the map to issue a server-authoritative movement order.
+- Select an army and press **Prepare to Move** first. Packing and redeployment take 5–30 seconds based on group count; the real loaded Recruits are placed at separated group anchors when deployment completes.
 - Press **A** to open army management and create an army from your available Recruits groups.
 - Press **P** inside the map to toggle the political tint layer.
 - Press **Esc** to close the map.
@@ -41,6 +42,8 @@ Black is reserved as unassigned by `unassignedRgb`, unless a future configuratio
 Mutation commands require permission level 2. Ownership and control are world SavedData, survive restarts, and synchronize from the server on join and after changes.
 
 Army commands are available under `/campaignmap army`: `list`, `create`, `info`, `rename`, `addgroup`, `removegroup`, `move`, and `delete`. Army records have their own UUIDs and store only campaign state and Recruits group UUID references. Recruits remains the authority for groups and soldiers, and one group can belong to only one campaign army.
+
+Player-facing customization uses army names: `/map rename "Army Name" New Name` and `/map setflag "Army Name"`. The latter opens an Immersive Paintings catalog and stores the chosen painting separately from Recruits group flags.
 
 ## External mod API
 

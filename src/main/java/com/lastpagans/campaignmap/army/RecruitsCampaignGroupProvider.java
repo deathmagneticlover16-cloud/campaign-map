@@ -9,6 +9,9 @@ import net.minecraft.server.level.ServerLevel;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.entity.Entity;
+import com.talhanation.recruits.entities.AbstractRecruitEntity;
 
 /** Optional adapter over Recruits' authoritative persistent group records. */
 public final class RecruitsCampaignGroupProvider implements CampaignGroupProvider {
@@ -27,6 +30,73 @@ public final class RecruitsCampaignGroupProvider implements CampaignGroupProvide
     public int soldierCount(ServerLevel level, UUID groupId) {
         RecruitsGroup group = find(level, groupId);
         return group == null || group.members == null ? 0 : group.members.size();
+    }
+
+    @Override
+    public String groupName(ServerLevel level, UUID groupId) {
+        RecruitsGroup group = find(level, groupId);
+        return group == null ? "Unknown group" : group.getName();
+    }
+
+    @Override
+    public void deploy(ServerLevel level, UUID groupId, Vec3 anchor) {
+        RecruitsGroup group = find(level, groupId);
+        if (group == null || group.members == null) return;
+        int index = 0;
+        for (UUID member : group.members) {
+            Entity entity = null;
+            for (ServerLevel candidate : level.getServer().getAllLevels()) {
+                entity = candidate.getEntity(member);
+                if (entity != null) break;
+            }
+            if (entity == null || !entity.isAlive()) continue;
+            if (entity instanceof AbstractRecruitEntity recruit) {
+                recruit.setNoAi(false); recruit.setInvisible(false); recruit.setInvulnerable(false);
+            }
+            double x = anchor.x + (index % 8) * 2.0;
+            double z = anchor.z + (index / 8) * 2.0;
+            double y = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
+                    net.minecraft.util.Mth.floor(x), net.minecraft.util.Mth.floor(z));
+            if (entity.level() != level) {
+                Entity moved = entity.changeDimension(level);
+                if (moved == null) continue;
+                entity = moved;
+            }
+            entity.teleportTo(x, y, z);
+            index++;
+        }
+    }
+
+    @Override
+    public void pack(ServerLevel level, UUID groupId) {
+        RecruitsGroup group = find(level, groupId);
+        if (group == null || group.members == null) return;
+        for (UUID member : group.members) for (ServerLevel candidate : level.getServer().getAllLevels()) {
+            Entity entity = candidate.getEntity(member);
+            if (entity instanceof AbstractRecruitEntity recruit) {
+                recruit.setNoAi(true); recruit.setInvisible(true); recruit.setInvulnerable(true);
+                break;
+            }
+        }
+    }
+
+    @Override
+    public void onEntityLoaded(ServerLevel level, Entity entity, CampaignArmyData armies) {
+        if (!(entity instanceof AbstractRecruitEntity recruit) || recruit.getGroup() == null) return;
+        var state = armies.stateForGroup(recruit.getGroup()).orElse(null);
+        if (state != com.lastpagans.campaignmap.api.army.ArmyState.DEPLOYED) {
+            if (state != null) { recruit.setNoAi(true); recruit.setInvisible(true); recruit.setInvulnerable(true); }
+            return;
+        }
+        recruit.setNoAi(false); recruit.setInvisible(false); recruit.setInvulnerable(false);
+        Vec3 anchor = armies.deployedAnchor(recruit.getGroup()).orElse(null);
+        if (anchor == null) return;
+        RecruitsGroup group = find(level, recruit.getGroup());
+        int index = group == null || group.members == null ? 0 : Math.max(0, group.members.indexOf(recruit.getUUID()));
+        double x = anchor.x + (index % 8) * 2.0, z = anchor.z + (index / 8) * 2.0;
+        double y = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
+                net.minecraft.util.Mth.floor(x), net.minecraft.util.Mth.floor(z));
+        recruit.teleportTo(x, y, z);
     }
 
     @Override

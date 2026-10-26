@@ -63,7 +63,7 @@ public final class CampaignCamera3D {
     public void zoom(double wheelAmount) {
         if (wheelAmount == 0.0) return;
         double factor = Math.pow(1.16, -wheelAmount);
-        targetDistance = clamp(targetDistance * factor, Math.max(70.0, Math.min(mapWidth, mapHeight) * 0.22),
+        targetDistance = clamp(targetDistance * factor, Math.max(90.0, Math.min(mapWidth, mapHeight) * 0.30),
                 Math.max(mapWidth, mapHeight) * 3.2);
         targetPitch = clamp(Math.toRadians(52.0) + (targetDistance / (Math.max(mapWidth, mapHeight) * 3.2))
                 * Math.toRadians(13.0), Math.toRadians(48.0), Math.toRadians(68.0));

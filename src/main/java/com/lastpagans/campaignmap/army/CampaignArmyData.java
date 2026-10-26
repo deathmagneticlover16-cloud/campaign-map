@@ -48,6 +48,7 @@ public final class CampaignArmyData extends SavedData {
 
     public CampaignArmySnapshot create(ServerLevel level, UUID ownerId, String name, @Nullable UUID commanderId, Vec3 position) {
         CampaignArmy army = new CampaignArmy(UUID.randomUUID(), ownerId, sanitizeName(name), commanderId, position);
+        army.state = ArmyState.DEPLOYED;
         armies.put(army.armyId, army);
         setDirty();
         return army.snapshot(level);
@@ -77,6 +78,15 @@ public final class CampaignArmyData extends SavedData {
         return true;
     }
 
+    public boolean setFlag(UUID armyId, net.minecraft.resources.ResourceLocation paintingId, double aspect) {
+        CampaignArmy army = armies.get(armyId);
+        if (army == null) return false;
+        army.flagTexture = paintingId;
+        army.flagAspectRatio = CampaignArmy.clampAspect(aspect);
+        setDirty();
+        return true;
+    }
+
     public MembershipResult addGroup(ServerLevel level, UUID armyId, UUID playerId, UUID groupId, boolean bypassOwnership) {
         CampaignArmy army = armies.get(armyId);
         if (army == null) return MembershipResult.ARMY_NOT_FOUND;
@@ -99,10 +109,19 @@ public final class CampaignArmyData extends SavedData {
 
     public boolean setMovementOrder(UUID armyId, Vec3 destination) {
         CampaignArmy army = armies.get(armyId);
-        if (army == null || army.state == ArmyState.DEPLOYED || army.state == ArmyState.DEPLOYING) return false;
+        if (army == null || army.state != ArmyState.MOVING) return false;
         army.path.clear();
         army.path.add(destination);
-        army.state = ArmyState.MOVING;
+        setDirty();
+        return true;
+    }
+
+    public boolean beginMovementMode(UUID armyId) {
+        CampaignArmy army = armies.get(armyId);
+        if (army == null || (army.state != ArmyState.DEPLOYED && army.state != ArmyState.STATIONARY)) return false;
+        army.path.clear();
+        army.state = ArmyState.RETREATING;
+        army.transitionTicks = deploymentTicks(army.groupIds.size());
         setDirty();
         return true;
     }
@@ -119,7 +138,25 @@ public final class CampaignArmyData extends SavedData {
     public List<CampaignArmySnapshot> tick(ServerLevel level) {
         List<CampaignArmySnapshot> changed = new ArrayList<>();
         for (CampaignArmy army : armies.values()) {
-            if ((army.state != ArmyState.MOVING && army.state != ArmyState.RETREATING) || army.path.isEmpty()) continue;
+            if (army.state == ArmyState.RETREATING) {
+                if (--army.transitionTicks <= 0) {
+                    army.transitionTicks = 0;
+                    army.groupIds.forEach(group -> CampaignGroupProviders.pack(level, group));
+                    army.state = ArmyState.MOVING;
+                }
+                changed.add(army.snapshot(level));
+                continue;
+            }
+            if (army.state == ArmyState.DEPLOYING) {
+                if (--army.transitionTicks <= 0) {
+                    army.transitionTicks = 0;
+                    deployGroups(level, army);
+                    army.state = ArmyState.DEPLOYED;
+                }
+                changed.add(army.snapshot(level));
+                continue;
+            }
+            if (army.state != ArmyState.MOVING || army.path.isEmpty()) continue;
             Vec3 destination = army.path.get(0);
             Vec3 delta = destination.subtract(army.position);
             double remaining = delta.horizontalDistance();
@@ -128,7 +165,10 @@ public final class CampaignArmyData extends SavedData {
             if (remaining <= step || remaining < 1.0e-5) {
                 army.position = destination;
                 army.path.remove(0);
-                if (army.path.isEmpty()) army.state = ArmyState.STATIONARY;
+                if (army.path.isEmpty()) {
+                    army.state = ArmyState.DEPLOYING;
+                    army.transitionTicks = deploymentTicks(army.groupIds.size());
+                }
             } else {
                 Vec3 horizontal = new Vec3(delta.x, 0.0, delta.z).normalize();
                 army.position = army.position.add(horizontal.scale(step));
@@ -138,6 +178,46 @@ public final class CampaignArmyData extends SavedData {
         }
         if (!changed.isEmpty()) setDirty();
         return changed;
+    }
+
+    private static int deploymentTicks(int groups) {
+        int seconds = groups <= 2 ? 5 : groups <= 5 ? 10 : groups <= 10 ? 20 : 30;
+        return seconds * 20;
+    }
+
+    private static void deployGroups(ServerLevel level, CampaignArmy army) {
+        int count = Math.max(1, army.groupIds.size());
+        for (int i = 0; i < army.groupIds.size(); i++) {
+            double angle = Math.PI * 2.0 * i / count;
+            Vec3 anchor = army.position.add(Math.cos(angle) * 12.0, 0.0, Math.sin(angle) * 12.0);
+            CampaignGroupProviders.deploy(level, army.groupIds.get(i), anchor);
+        }
+    }
+
+    public Optional<Vec3> deployedAnchor(UUID groupId) {
+        UUID armyId = groupMembership.get(groupId);
+        CampaignArmy army = armyId == null ? null : armies.get(armyId);
+        if (army == null || army.state != ArmyState.DEPLOYED) return Optional.empty();
+        int index = army.groupIds.indexOf(groupId);
+        if (index < 0) return Optional.empty();
+        double angle = Math.PI * 2.0 * index / Math.max(1, army.groupIds.size());
+        return Optional.of(army.position.add(Math.cos(angle) * 12.0, 0.0, Math.sin(angle) * 12.0));
+    }
+
+    public boolean deployNow(ServerLevel level, UUID armyId) {
+        CampaignArmy army = armies.get(armyId);
+        if (army == null) return false;
+        deployGroups(level, army);
+        army.state = ArmyState.DEPLOYED;
+        army.transitionTicks = 0;
+        setDirty();
+        return true;
+    }
+
+    public Optional<ArmyState> stateForGroup(UUID groupId) {
+        UUID armyId = groupMembership.get(groupId);
+        CampaignArmy army = armyId == null ? null : armies.get(armyId);
+        return army == null ? Optional.empty() : Optional.of(army.state);
     }
 
     private static String sanitizeName(String name) {

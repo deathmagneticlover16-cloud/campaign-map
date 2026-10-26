@@ -76,6 +76,7 @@ public final class CampaignMapScreen extends Screen {
         clampTextureToSingleImage(minecraft.getTextureManager().getTexture(FRONTEND));
         clampTextureToSingleImage(overlayTexture);
         rebuildOverlay();
+        CampaignNetwork.requestGroupCatalog();
     }
 
     @Override
@@ -218,7 +219,9 @@ public final class CampaignMapScreen extends Screen {
             shown++;
         }
         if (mouseY >= height - 66 && mouseY < height - 44 && !pendingGroups.isEmpty()) {
-            CampaignNetwork.requestArmyCreation("New Army", java.util.List.copyOf(pendingGroups));
+            String name = ClientGroupCatalog.groups().stream().filter(group -> pendingGroups.contains(group.groupId()))
+                    .findFirst().map(group -> group.name() + " Army").orElse("New Army");
+            CampaignNetwork.requestArmyCreation(name, java.util.List.copyOf(pendingGroups));
             pendingGroups.clear();
             armyManagementMode = false;
             return true;
@@ -230,18 +233,45 @@ public final class CampaignMapScreen extends Screen {
         int y = 60;
         graphics.drawString(font, army.armyName().toUpperCase(), left + 14, y, 0xFFFFDDA0, false);
         y += 22;
-        y = panelLine(graphics, left, y, "Army", army.armyId().toString());
-        y = panelLine(graphics, left, y, "State", army.state().name());
-        y = panelLine(graphics, left, y, "Commander", army.commanderId() == null ? "Unassigned" : army.commanderId().toString());
+        y = panelLine(graphics, left, y, "State", stateLabel(army.state()));
+        y = panelLine(graphics, left, y, "Commander", playerName(army.commanderId()));
         y = panelLine(graphics, left, y, "Soldiers", Integer.toString(army.totalSoldiers()));
-        y = panelLine(graphics, left, y, "Groups", Integer.toString(army.groupIds().size()));
+        y = panelLine(graphics, left, y, "Groups", groupNames(army));
         y = panelLine(graphics, left, y, "Food", Integer.toString(army.foodSupplies()));
         y = panelLine(graphics, left, y, "Fatigue", String.format("%.1f", army.fatigue()));
         panelLine(graphics, left, y, "Position", String.format("%.1f, %.1f",
                 army.campaignPosition().x, army.campaignPosition().z));
         if (selectedArmy != null) {
-            graphics.drawString(font, "SELECTED • RIGHT-CLICK MAP TO MOVE", left + 14, height - 38, 0xFF61DDF2, false);
+            boolean ready = army.state() == com.lastpagans.campaignmap.api.army.ArmyState.MOVING;
+            graphics.fill(left + 14, height - 66, width - 14, height - 44, ready ? 0xFF31596A : 0xFF8D744B);
+            graphics.drawCenteredString(font, ready ? "RIGHT-CLICK MAP TO MOVE" : "PREPARE TO MOVE",
+                    left + PANEL_WIDTH / 2, height - 59, 0xFFFFFFFF);
         }
+    }
+
+    private String playerName(@Nullable java.util.UUID playerId) {
+        if (playerId == null) return "Unassigned";
+        var connection = minecraft.getConnection();
+        var info = connection == null ? null : connection.getPlayerInfo(playerId);
+        return info == null ? "Offline commander" : info.getProfile().getName();
+    }
+
+    private static String stateLabel(com.lastpagans.campaignmap.api.army.ArmyState state) {
+        return switch (state) {
+            case RETREATING -> "Preparing to move";
+            case MOVING -> "Movement mode";
+            case DEPLOYING -> "Deploying groups";
+            case DEPLOYED -> "Deployed";
+            case STATIONARY -> "Stationary";
+        };
+    }
+
+    private String groupNames(CampaignArmySnapshot army) {
+        return army.groupIds().stream().map(id -> ClientGroupCatalog.groups().stream()
+                .filter(group -> group.groupId().equals(id))
+                .map(group -> group.name() + " (" + group.soldierCount() + ")")
+                .findFirst().orElse("Group (offline)"))
+                .collect(java.util.stream.Collectors.joining(", "));
     }
 
     private int panelLine(GuiGraphics graphics, int left, int y, String label, String value) {
@@ -336,6 +366,14 @@ public final class CampaignMapScreen extends Screen {
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
             if (handleArmyPanelClick(mouseX, mouseY)) return true;
+            if (selectedArmy != null && mouseX >= width - PANEL_WIDTH + 14 && mouseY >= height - 66 && mouseY < height - 44) {
+                ClientArmyCache.get(selectedArmy).ifPresent(entry -> {
+                    if (entry.snapshot().state() == com.lastpagans.campaignmap.api.army.ArmyState.DEPLOYED
+                            || entry.snapshot().state() == com.lastpagans.campaignmap.api.army.ArmyState.STATIONARY)
+                        CampaignNetwork.requestMovementMode(selectedArmy);
+                });
+                return true;
+            }
             if (hoveredArmy != null) {
                 selectedArmy = hoveredArmy;
                 selectedProvince = null;
@@ -408,6 +446,7 @@ public final class CampaignMapScreen extends Screen {
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
         if (keyCode == GLFW.GLFW_KEY_A) {
             armyManagementMode = !armyManagementMode;
+            if (armyManagementMode) CampaignNetwork.requestGroupCatalog();
             return true;
         }
         if (keyCode == GLFW.GLFW_KEY_P) {

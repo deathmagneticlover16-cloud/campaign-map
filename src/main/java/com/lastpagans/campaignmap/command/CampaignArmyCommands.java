@@ -66,6 +66,37 @@ public final class CampaignArmyCommands {
                                 .then(Commands.argument("army", StringArgumentType.word())
                                         .executes(context -> delete(context.getSource(),
                                                 uuid(context.getArgument("army", String.class))))))));
+        dispatcher.register(Commands.literal("map")
+                .then(Commands.literal("setflag")
+                        .then(Commands.argument("army", StringArgumentType.string())
+                                .executes(context -> setFlag(context.getSource(), StringArgumentType.getString(context, "army")))))
+                .then(Commands.literal("rename")
+                        .then(Commands.argument("army", StringArgumentType.string())
+                                .then(Commands.argument("name", StringArgumentType.greedyString())
+                                        .executes(context -> renameNamed(context.getSource(),
+                                                StringArgumentType.getString(context, "army"),
+                                                StringArgumentType.getString(context, "name")))))));
+    }
+
+    private static int setFlag(CommandSourceStack source, String armyName) throws CommandSyntaxException {
+        ServerPlayer player = source.getPlayerOrException();
+        CampaignArmySnapshot army = requireOwnedNamed(source, armyName);
+        CampaignNetwork.openArmyFlagEditor(player, army.armyId());
+        return 1;
+    }
+
+    private static int renameNamed(CommandSourceStack source, String armyName, String newName) throws CommandSyntaxException {
+        CampaignArmySnapshot army = requireOwnedNamed(source, armyName);
+        return rename(source, army.armyId(), newName);
+    }
+
+    private static CampaignArmySnapshot requireOwnedNamed(CommandSourceStack source, String name) throws CommandSyntaxException {
+        ServerPlayer player = source.getPlayerOrException();
+        var matches = CampaignArmyData.get(source.getLevel()).snapshots(source.getLevel()).stream()
+                .filter(army -> army.ownerId().equals(player.getUUID()) && army.armyName().equalsIgnoreCase(name)).toList();
+        if (matches.size() != 1) throw ARMY_ERROR.create(matches.isEmpty()
+                ? "No owned army is named '" + name + "'." : "More than one owned army has that name.");
+        return matches.get(0);
     }
 
     private static int list(CommandSourceStack source) {

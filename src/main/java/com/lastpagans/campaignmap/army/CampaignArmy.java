@@ -1,6 +1,5 @@
 package com.lastpagans.campaignmap.army;
 
-import com.lastpagans.campaignmap.CampaignMapMod;
 import com.lastpagans.campaignmap.api.army.ArmyState;
 import com.lastpagans.campaignmap.api.army.CampaignArmySnapshot;
 import com.lastpagans.campaignmap.api.army.CampaignGroupProviders;
@@ -18,8 +17,8 @@ import java.util.List;
 import java.util.UUID;
 
 final class CampaignArmy {
-    static final ResourceLocation DEFAULT_FLAG = new ResourceLocation(CampaignMapMod.MOD_ID,
-            "textures/misc/default_army_banner.png");
+    static final ResourceLocation DEFAULT_FLAG = new ResourceLocation("recruits_rts_camera",
+            "textures/misc/betsy_ross_group_marker.png");
 
     final UUID armyId;
     final UUID ownerId;
@@ -33,6 +32,7 @@ final class CampaignArmy {
     ArmyState state = ArmyState.STATIONARY;
     int foodSupplies;
     double fatigue;
+    int transitionTicks;
 
     CampaignArmy(UUID armyId, UUID ownerId, String name, @Nullable UUID commanderId, Vec3 position) {
         this.armyId = armyId;
@@ -70,6 +70,7 @@ final class CampaignArmy {
         tag.putString("state", state.name());
         tag.putInt("foodSupplies", foodSupplies);
         tag.putDouble("fatigue", fatigue);
+        tag.putInt("transitionTicks", transitionTicks);
         return tag;
     }
 
@@ -91,7 +92,8 @@ final class CampaignArmy {
         catch (IllegalArgumentException ignored) { army.state = ArmyState.STATIONARY; }
         army.foodSupplies = Math.max(0, tag.getInt("foodSupplies"));
         army.fatigue = Math.max(0.0, tag.getDouble("fatigue"));
-        if (army.path.isEmpty() && (army.state == ArmyState.MOVING || army.state == ArmyState.RETREATING)) {
+        army.transitionTicks = Math.max(0, tag.getInt("transitionTicks"));
+        if (army.path.isEmpty() && army.state == ArmyState.MOVING) {
             army.state = ArmyState.STATIONARY;
         }
         return army;

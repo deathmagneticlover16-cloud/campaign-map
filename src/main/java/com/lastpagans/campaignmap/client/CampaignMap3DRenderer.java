@@ -40,6 +40,9 @@ public final class CampaignMap3DRenderer {
                 var p10 = camera.project(x1, 0.0, z0);
                 var p11 = camera.project(x1, 0.0, z1);
                 var p01 = camera.project(x0, 0.0, z1);
+                // Never submit a quad that crosses the camera plane. Its behind-camera
+                // corners otherwise project to the origin and stretch across the GUI.
+                if (p00.depth() <= 1.0 || p10.depth() <= 1.0 || p11.depth() <= 1.0 || p01.depth() <= 1.0) continue;
                 vertex(buffer, matrix, p00, u0, v0, alpha);
                 vertex(buffer, matrix, p10, u1, v0, alpha);
                 vertex(buffer, matrix, p11, u1, v1, alpha);
