@@ -10,6 +10,8 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.entity.Entity;
 import com.lastpagans.campaignmap.army.CampaignArmyData;
 import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.CompoundTag;
+import java.util.Optional;
 
 public final class CampaignGroupProviders {
     private static final List<CampaignGroupProvider> PROVIDERS = new CopyOnWriteArrayList<>();
@@ -61,5 +63,31 @@ public final class CampaignGroupProviders {
         PROVIDERS.forEach(provider -> provider.ownedGroups(level, playerId)
                 .forEach(group -> groups.putIfAbsent(group.groupId(), group)));
         return List.copyOf(groups.values());
+    }
+
+    public static boolean canCommand(ServerLevel level, UUID playerId, UUID commanderId) {
+        return PROVIDERS.stream().filter(provider -> provider.recognizesCommander(level, commanderId))
+                .anyMatch(provider -> provider.canCommand(level, playerId, commanderId));
+    }
+
+    public static List<CampaignCommanderSummary> ownedCommanders(ServerLevel level, UUID playerId) {
+        LinkedHashMap<UUID, CampaignCommanderSummary> commanders = new LinkedHashMap<>();
+        PROVIDERS.forEach(provider -> provider.ownedCommanders(level, playerId)
+                .forEach(commander -> commanders.putIfAbsent(commander.commanderId(), commander)));
+        return List.copyOf(commanders.values());
+    }
+
+    public static Optional<CommanderVisualSnapshot> commanderVisual(ServerLevel level, UUID commanderId) {
+        return PROVIDERS.stream().filter(provider -> provider.recognizesCommander(level, commanderId))
+                .map(provider -> provider.commanderVisual(level, commanderId)).flatMap(Optional::stream).findFirst();
+    }
+
+    public static Optional<CompoundTag> packCommander(ServerLevel level, UUID commanderId) {
+        return PROVIDERS.stream().filter(provider -> provider.recognizesCommander(level, commanderId))
+                .map(provider -> provider.packCommander(level, commanderId)).flatMap(Optional::stream).findFirst();
+    }
+
+    public static void deployCommander(ServerLevel level, UUID commanderId, Vec3 anchor, CompoundTag packedCommander) {
+        PROVIDERS.forEach(provider -> provider.deployCommander(level, commanderId, anchor, packedCommander));
     }
 }

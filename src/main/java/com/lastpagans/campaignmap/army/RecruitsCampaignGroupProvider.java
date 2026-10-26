@@ -12,6 +12,9 @@ import java.util.UUID;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.entity.Entity;
 import com.talhanation.recruits.entities.AbstractRecruitEntity;
+import com.talhanation.recruits.entities.CommanderEntity;
+import com.lastpagans.campaignmap.api.army.CampaignCommanderSummary;
+import com.lastpagans.campaignmap.api.army.CommanderVisualSnapshot;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
@@ -19,6 +22,8 @@ import net.minecraft.world.entity.EntityType;
 import net.minecraftforge.fml.ModList;
 
 import java.lang.reflect.Method;
+import java.util.Optional;
+import net.minecraftforge.registries.ForgeRegistries;
 
 /** Optional adapter over Recruits' authoritative persistent group records. */
 public final class RecruitsCampaignGroupProvider implements CampaignGroupProvider {
@@ -98,6 +103,18 @@ public final class RecruitsCampaignGroupProvider implements CampaignGroupProvide
 
     @Override
     public void onEntityLoaded(ServerLevel level, Entity entity, CampaignArmyData armies) {
+        if (entity instanceof CommanderEntity commander && armies.hasCommander(commander.getUUID())) {
+            armies.updateCommanderVisual(commander.getUUID(), visual(commander));
+            var state = armies.stateForCommander(commander.getUUID()).orElse(null);
+            if (state != null && state != com.lastpagans.campaignmap.api.army.ArmyState.DEPLOYED) {
+                CompoundTag packed = new CompoundTag();
+                if (commander.save(packed)) {
+                    armies.setPackedCommander(commander.getUUID(), packed);
+                    commander.discard();
+                }
+                return;
+            }
+        }
         if (!(entity instanceof AbstractRecruitEntity recruit) || recruit.getGroup() == null) return;
         var state = armies.stateForGroup(recruit.getGroup()).orElse(null);
         if (state != com.lastpagans.campaignmap.api.army.ArmyState.DEPLOYED) {
@@ -126,6 +143,86 @@ public final class RecruitsCampaignGroupProvider implements CampaignGroupProvide
             result.add(new CampaignGroupSummary(group.getUUID(), group.getName(), soldiers));
         }
         return List.copyOf(result);
+    }
+
+    @Override
+    public boolean recognizesCommander(ServerLevel level, UUID commanderId) {
+        return findCommander(level, commanderId) != null;
+    }
+
+    @Override
+    public boolean canCommand(ServerLevel level, UUID playerId, UUID commanderId) {
+        CommanderEntity commander = findCommander(level, commanderId);
+        return commander != null && commander.isAlive() && playerId.equals(commander.getOwnerUUID());
+    }
+
+    @Override
+    public List<CampaignCommanderSummary> ownedCommanders(ServerLevel level, UUID playerId) {
+        List<CampaignCommanderSummary> result = new ArrayList<>();
+        for (ServerLevel candidate : level.getServer().getAllLevels()) {
+            for (Entity entity : candidate.getAllEntities()) {
+                if (entity instanceof CommanderEntity commander && commander.isAlive()
+                        && playerId.equals(commander.getOwnerUUID())) {
+                    result.add(new CampaignCommanderSummary(commander.getUUID(), commanderName(commander)));
+                }
+            }
+        }
+        return List.copyOf(result);
+    }
+
+    @Override
+    public Optional<CommanderVisualSnapshot> commanderVisual(ServerLevel level, UUID commanderId) {
+        CommanderEntity commander = findCommander(level, commanderId);
+        return commander == null || !commander.isAlive() ? Optional.empty() : Optional.of(visual(commander));
+    }
+
+    @Override
+    public Optional<CompoundTag> packCommander(ServerLevel level, UUID commanderId) {
+        CommanderEntity commander = findCommander(level, commanderId);
+        if (commander == null || !commander.isAlive()) return Optional.empty();
+        CompoundTag packed = new CompoundTag();
+        if (!commander.save(packed)) return Optional.empty();
+        commander.discard();
+        return Optional.of(packed);
+    }
+
+    @Override
+    public void deployCommander(ServerLevel level, UUID commanderId, Vec3 anchor, CompoundTag packedCommander) {
+        if (packedCommander == null || packedCommander.isEmpty() || findCommander(level, commanderId) != null) return;
+        Entity restored = EntityType.loadEntityRecursive(packedCommander, level, entity -> {
+            if (!(entity instanceof CommanderEntity) || !commanderId.equals(entity.getUUID())) return null;
+            place(level, entity, anchor, 0);
+            return entity;
+        });
+        if (restored != null) level.addFreshEntityWithPassengers(restored);
+    }
+
+    private static CommanderEntity findCommander(ServerLevel level, UUID commanderId) {
+        for (ServerLevel candidate : level.getServer().getAllLevels()) {
+            Entity entity = candidate.getEntity(commanderId);
+            if (entity instanceof CommanderEntity commander) return commander;
+        }
+        return null;
+    }
+
+    private static CommanderVisualSnapshot visual(CommanderEntity commander) {
+        CompoundTag full = new CompoundTag();
+        commander.save(full);
+        CompoundTag appearance = new CompoundTag();
+        for (String key : List.of("Variant", "Color", "Biome", "CustomName", "CustomNameVisible",
+                "ArmorItems", "HandItems", "Items", "BeforeItemSlot", "LeftHanded")) {
+            Tag value = full.get(key);
+            if (value != null) appearance.put(key, value.copy());
+        }
+        var typeId = ForgeRegistries.ENTITY_TYPES.getKey(commander.getType());
+        if (typeId == null) typeId = new net.minecraft.resources.ResourceLocation("recruits", "patrol_leader");
+        return new CommanderVisualSnapshot(typeId, commanderName(commander), appearance);
+    }
+
+    private static String commanderName(CommanderEntity commander) {
+        String name = commander.getDisplayName().getString();
+        if (name.isBlank()) name = "Commander";
+        return name.substring(0, Math.min(128, name.length()));
     }
 
     private static RecruitsGroup find(ServerLevel level, UUID groupId) {

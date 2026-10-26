@@ -25,7 +25,7 @@ import java.util.List;
 import java.util.function.Supplier;
 
 public final class CampaignNetwork {
-    private static final String PROTOCOL = "5";
+    private static final String PROTOCOL = "6";
     private static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(CampaignMapMod.MOD_ID, "main"), () -> PROTOCOL, PROTOCOL::equals, PROTOCOL::equals);
 
@@ -78,6 +78,9 @@ public final class CampaignNetwork {
         CHANNEL.messageBuilder(ArmyFlagEditorRequestPacket.class, 11, NetworkDirection.PLAY_TO_SERVER)
                 .encoder(ArmyFlagEditorRequestPacket::encode).decoder(ArmyFlagEditorRequestPacket::decode)
                 .consumerMainThread(CampaignNetwork::handleFlagEditorRequest).add();
+        CHANNEL.messageBuilder(ArmyCommanderRequestPacket.class, 12, NetworkDirection.PLAY_TO_SERVER)
+                .encoder(ArmyCommanderRequestPacket::encode).decoder(ArmyCommanderRequestPacket::decode)
+                .consumerMainThread(CampaignNetwork::handleCommanderRequest).add();
     }
 
     private static void handleOwnership(OwnershipSyncPacket packet, Supplier<NetworkEvent.Context> contextSupplier) {
@@ -114,6 +117,11 @@ public final class CampaignNetwork {
         ServerPlayer player = context.getSender();
         if (player != null && !packet.groupIds().isEmpty() && packet.groupIds().size() <= 128) {
             CampaignArmyData data = CampaignArmyData.get(player.serverLevel());
+            if (data.isCommanderAssigned(packet.commanderId())
+                    || !CampaignGroupProviders.canCommand(player.serverLevel(), player.getUUID(), packet.commanderId())) {
+                context.setPacketHandled(true);
+                return;
+            }
             List<java.util.UUID> validGroups = packet.groupIds().stream().distinct()
                     .filter(group -> CampaignGroupProviders.hasProviderFor(player.serverLevel(), group))
                     .filter(group -> CampaignGroupProviders.canManage(player.serverLevel(), player.getUUID(), group))
@@ -130,7 +138,7 @@ public final class CampaignNetwork {
                     z = center.z();
                 }
                 CampaignArmySnapshot army = data.create(player.serverLevel(), player.getUUID(), packet.name(),
-                        player.getUUID(), new Vec3(x, 0.0, z));
+                        packet.commanderId(), new Vec3(x, 0.0, z));
                 for (java.util.UUID group : validGroups) {
                     data.addGroup(player.serverLevel(), army.armyId(), player.getUUID(), group, false);
                 }
@@ -168,7 +176,8 @@ public final class CampaignNetwork {
         NetworkEvent.Context context = supplier.get();
         ServerPlayer player = context.getSender();
         if (player != null) CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new GroupCatalogSyncPacket(
-                CampaignGroupProviders.ownedGroups(player.serverLevel(), player.getUUID())));
+                CampaignGroupProviders.ownedGroups(player.serverLevel(), player.getUUID()),
+                CampaignGroupProviders.ownedCommanders(player.serverLevel(), player.getUUID())));
         context.setPacketHandled(true);
     }
 
@@ -202,13 +211,23 @@ public final class CampaignNetwork {
         context.setPacketHandled(true);
     }
 
+    private static void handleCommanderRequest(ArmyCommanderRequestPacket packet, Supplier<NetworkEvent.Context> supplier) {
+        NetworkEvent.Context context = supplier.get();
+        ServerPlayer player = context.getSender();
+        if (player != null) CampaignArmyData.get(player.serverLevel())
+                .appointCommander(player.serverLevel(), packet.armyId(), player.getUUID(), packet.commanderId())
+                .ifPresent(CampaignNetwork::sendArmyUpdate);
+        context.setPacketHandled(true);
+    }
+
     public static void sendFull(ServerPlayer player) {
         CampaignOwnershipData data = CampaignOwnershipData.get(player.serverLevel());
         CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new OwnershipSyncPacket(true, List.copyOf(data.states())));
         CampaignArmyData armyData = CampaignArmyData.get(player.serverLevel());
         CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), ArmySyncPacket.full(armyData.snapshots(player.serverLevel())));
         CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new GroupCatalogSyncPacket(
-                CampaignGroupProviders.ownedGroups(player.serverLevel(), player.getUUID())));
+                CampaignGroupProviders.ownedGroups(player.serverLevel(), player.getUUID()),
+                CampaignGroupProviders.ownedCommanders(player.serverLevel(), player.getUUID())));
     }
 
     public static void sendUpdate(ProvinceOwnerState state) {
@@ -227,8 +246,8 @@ public final class CampaignNetwork {
         CHANNEL.sendToServer(new ArmyMoveRequestPacket(armyId, worldX, worldZ));
     }
 
-    public static void requestArmyCreation(String name, List<java.util.UUID> groupIds) {
-        CHANNEL.sendToServer(new ArmyCreateRequestPacket(name, List.copyOf(groupIds)));
+    public static void requestArmyCreation(String name, java.util.UUID commanderId, List<java.util.UUID> groupIds) {
+        CHANNEL.sendToServer(new ArmyCreateRequestPacket(name, commanderId, List.copyOf(groupIds)));
     }
 
     public static void requestArmyFlag(java.util.UUID armyId, ResourceLocation paintingId, double aspect) {
@@ -241,6 +260,9 @@ public final class CampaignNetwork {
     public static void requestDeployment(java.util.UUID armyId) { CHANNEL.sendToServer(new ArmyDeployRequestPacket(armyId)); }
     public static void requestArmyRename(java.util.UUID armyId, String name) { CHANNEL.sendToServer(new ArmyRenameRequestPacket(armyId, name)); }
     public static void requestFlagEditor(java.util.UUID armyId) { CHANNEL.sendToServer(new ArmyFlagEditorRequestPacket(armyId)); }
+    public static void requestCommander(java.util.UUID armyId, java.util.UUID commanderId) {
+        CHANNEL.sendToServer(new ArmyCommanderRequestPacket(armyId, commanderId));
+    }
     public static void requestGroupCatalog() { CHANNEL.sendToServer(new GroupCatalogRequestPacket()); }
 
     public static void openArmyFlagEditor(ServerPlayer player, java.util.UUID armyId) {

@@ -3,6 +3,7 @@ package com.lastpagans.campaignmap.army;
 import com.lastpagans.campaignmap.api.army.ArmyState;
 import com.lastpagans.campaignmap.api.army.CampaignArmySnapshot;
 import com.lastpagans.campaignmap.api.army.CampaignGroupProviders;
+import com.lastpagans.campaignmap.api.army.CommanderVisualSnapshot;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
@@ -10,7 +11,6 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.saveddata.SavedData;
 import net.minecraft.world.phys.Vec3;
 
-import javax.annotation.Nullable;
 import java.util.*;
 
 public final class CampaignArmyData extends SavedData {
@@ -18,6 +18,8 @@ public final class CampaignArmyData extends SavedData {
     private static final double DEFAULT_MOVEMENT_SPEED = 8.0;
     private final Map<UUID, CampaignArmy> armies = new LinkedHashMap<>();
     private final Map<UUID, UUID> groupMembership = new HashMap<>();
+    private final Map<UUID, UUID> commanderMembership = new HashMap<>();
+    private int commanderRefreshTicker;
 
     public static CampaignArmyData get(ServerLevel level) {
         ServerLevel storageLevel = level.getServer().overworld();
@@ -29,6 +31,14 @@ public final class CampaignArmyData extends SavedData {
         for (Tag raw : root.getList("armies", Tag.TAG_COMPOUND)) {
             CampaignArmy army = CampaignArmy.load((CompoundTag) raw);
             data.armies.put(army.armyId, army);
+            if (army.commanderId != null) {
+                UUID existingCommander = data.commanderMembership.putIfAbsent(army.commanderId, army.armyId);
+                if (existingCommander != null) {
+                    army.commanderId = null;
+                    army.commanderVisual = null;
+                    army.commanderAvailable = false;
+                }
+            }
             for (Iterator<UUID> iterator = army.groupIds.iterator(); iterator.hasNext();) {
                 UUID group = iterator.next();
                 UUID existing = data.groupMembership.putIfAbsent(group, army.armyId);
@@ -46,10 +56,14 @@ public final class CampaignArmyData extends SavedData {
         return root;
     }
 
-    public CampaignArmySnapshot create(ServerLevel level, UUID ownerId, String name, @Nullable UUID commanderId, Vec3 position) {
-        CampaignArmy army = new CampaignArmy(UUID.randomUUID(), ownerId, sanitizeName(name), commanderId, position);
+    public CampaignArmySnapshot create(ServerLevel level, UUID ownerId, String name, UUID commanderId, Vec3 position) {
+        if (commanderMembership.containsKey(commanderId)) throw new IllegalArgumentException("Commander is already assigned");
+        CommanderVisualSnapshot visual = CampaignGroupProviders.commanderVisual(level, commanderId)
+                .orElseThrow(() -> new IllegalArgumentException("Commander is unavailable"));
+        CampaignArmy army = new CampaignArmy(UUID.randomUUID(), ownerId, sanitizeName(name), commanderId, visual, position);
         army.state = ArmyState.DEPLOYED;
         armies.put(army.armyId, army);
+        commanderMembership.put(commanderId, army.armyId);
         setDirty();
         return army.snapshot(level);
     }
@@ -69,6 +83,8 @@ public final class CampaignArmyData extends SavedData {
     }
 
     public boolean isGroupAssigned(UUID groupId) { return groupMembership.containsKey(groupId); }
+    public boolean isCommanderAssigned(UUID commanderId) { return commanderMembership.containsKey(commanderId); }
+    public boolean hasCommander(UUID commanderId) { return commanderMembership.containsKey(commanderId); }
 
     public boolean rename(ServerLevel level, UUID armyId, String name) {
         CampaignArmy army = armies.get(armyId);
@@ -120,7 +136,8 @@ public final class CampaignArmyData extends SavedData {
 
     public boolean beginMovementMode(UUID armyId) {
         CampaignArmy army = armies.get(armyId);
-        if (army == null || (army.state != ArmyState.DEPLOYED && army.state != ArmyState.STATIONARY)) return false;
+        if (army == null || !army.commanderAvailable
+                || (army.state != ArmyState.DEPLOYED && army.state != ArmyState.STATIONARY)) return false;
         army.path.clear();
         army.state = ArmyState.RETREATING;
         army.transitionTicks = army.transitionTicksTotal = deploymentTicks(army.groupIds.size());
@@ -134,6 +151,7 @@ public final class CampaignArmyData extends SavedData {
         CampaignArmy removed = armies.remove(armyId);
         if (removed == null) return false;
         removed.groupIds.forEach(group -> groupMembership.remove(group, armyId));
+        if (removed.commanderId != null) commanderMembership.remove(removed.commanderId, armyId);
         setDirty();
         return true;
     }
@@ -145,6 +163,14 @@ public final class CampaignArmyData extends SavedData {
             if (army.state == ArmyState.RETREATING) {
                 if (--army.transitionTicks <= 0) {
                     army.transitionTicks = 0;
+                    Optional<CompoundTag> commander = army.commanderId == null ? Optional.empty()
+                            : CampaignGroupProviders.packCommander(level, army.commanderId);
+                    if (commander.isEmpty()) {
+                        army.state = ArmyState.DEPLOYED;
+                        changed.add(army.snapshot(level));
+                        continue;
+                    }
+                    army.packedCommander = commander.get().copy();
                     army.groupIds.forEach(group -> {
                         ListTag packed = CampaignGroupProviders.pack(level, group);
                         mergePacked(army, group, packed);
@@ -179,6 +205,20 @@ public final class CampaignArmyData extends SavedData {
             army.fatigue = Math.min(100.0, army.fatigue + 0.0025);
             changed.add(army.snapshot(level));
         }
+        if (++commanderRefreshTicker >= 20) {
+            commanderRefreshTicker = 0;
+            for (CampaignArmy army : armies.values()) {
+                if (army.commanderId == null || army.state != ArmyState.DEPLOYED) continue;
+                CampaignGroupProviders.commanderVisual(level, army.commanderId).ifPresent(visual -> {
+                    if (!visual.equals(army.commanderVisual) || !army.commanderAvailable) {
+                        army.commanderVisual = visual;
+                        army.commanderAvailable = true;
+                        CampaignArmySnapshot snapshot = army.snapshot(level);
+                        if (!changed.contains(snapshot)) changed.add(snapshot);
+                    }
+                });
+            }
+        }
         if (!changed.isEmpty()) setDirty();
         return changed;
     }
@@ -199,6 +239,10 @@ public final class CampaignArmyData extends SavedData {
     }
 
     private static void deployGroups(ServerLevel level, CampaignArmy army) {
+        if (army.commanderId != null && army.packedCommander != null) {
+            CampaignGroupProviders.deployCommander(level, army.commanderId, army.position, army.packedCommander);
+            army.packedCommander = null;
+        }
         int count = Math.max(1, army.groupIds.size());
         for (int i = 0; i < army.groupIds.size(); i++) {
             double angle = Math.PI * 2.0 * i / count;
@@ -234,6 +278,57 @@ public final class CampaignArmyData extends SavedData {
         UUID armyId = groupMembership.get(groupId);
         CampaignArmy army = armyId == null ? null : armies.get(armyId);
         return army == null ? Optional.empty() : Optional.of(army.state);
+    }
+
+    public Optional<ArmyState> stateForCommander(UUID commanderId) {
+        UUID armyId = commanderMembership.get(commanderId);
+        CampaignArmy army = armyId == null ? null : armies.get(armyId);
+        return army == null ? Optional.empty() : Optional.of(army.state);
+    }
+
+    public void updateCommanderVisual(UUID commanderId, CommanderVisualSnapshot visual) {
+        UUID armyId = commanderMembership.get(commanderId);
+        CampaignArmy army = armyId == null ? null : armies.get(armyId);
+        if (army == null) return;
+        army.commanderVisual = visual;
+        army.commanderAvailable = true;
+        setDirty();
+    }
+
+    public void setPackedCommander(UUID commanderId, CompoundTag packed) {
+        UUID armyId = commanderMembership.get(commanderId);
+        CampaignArmy army = armyId == null ? null : armies.get(armyId);
+        if (army == null) return;
+        army.packedCommander = packed.copy();
+        setDirty();
+    }
+
+    public Optional<CampaignArmySnapshot> markCommanderUnavailable(ServerLevel level, UUID commanderId) {
+        UUID armyId = commanderMembership.get(commanderId);
+        CampaignArmy army = armyId == null ? null : armies.get(armyId);
+        if (army == null) return Optional.empty();
+        army.commanderAvailable = false;
+        army.packedCommander = null;
+        setDirty();
+        return Optional.of(army.snapshot(level));
+    }
+
+    public Optional<CampaignArmySnapshot> appointCommander(ServerLevel level, UUID armyId, UUID ownerId, UUID commanderId) {
+        CampaignArmy army = armies.get(armyId);
+        if (army == null || !army.ownerId.equals(ownerId)
+                || (army.state != ArmyState.DEPLOYED && army.state != ArmyState.STATIONARY)
+                || commanderMembership.containsKey(commanderId)
+                || !CampaignGroupProviders.canCommand(level, ownerId, commanderId)) return Optional.empty();
+        CommanderVisualSnapshot visual = CampaignGroupProviders.commanderVisual(level, commanderId).orElse(null);
+        if (visual == null) return Optional.empty();
+        if (army.commanderId != null) commanderMembership.remove(army.commanderId, armyId);
+        army.commanderId = commanderId;
+        army.commanderVisual = visual;
+        army.commanderAvailable = true;
+        army.packedCommander = null;
+        commanderMembership.put(commanderId, armyId);
+        setDirty();
+        return Optional.of(army.snapshot(level));
     }
 
     public void addPackedEntity(UUID groupId, CompoundTag entityTag) {

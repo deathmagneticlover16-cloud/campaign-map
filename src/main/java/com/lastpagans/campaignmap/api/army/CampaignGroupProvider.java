@@ -8,6 +8,8 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.entity.Entity;
 import com.lastpagans.campaignmap.army.CampaignArmyData;
 import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.CompoundTag;
+import java.util.Optional;
 
 /**
  * Integration point for Recruits RTS or another tactical-group owner.
@@ -29,4 +31,13 @@ public interface CampaignGroupProvider {
     default void onEntityLoaded(ServerLevel level, Entity entity, CampaignArmyData armies) {}
 
     default List<CampaignGroupSummary> ownedGroups(ServerLevel level, UUID playerId) { return List.of(); }
+
+    default boolean recognizesCommander(ServerLevel level, UUID commanderId) { return false; }
+    default boolean canCommand(ServerLevel level, UUID playerId, UUID commanderId) { return false; }
+    default List<CampaignCommanderSummary> ownedCommanders(ServerLevel level, UUID playerId) { return List.of(); }
+    default Optional<CommanderVisualSnapshot> commanderVisual(ServerLevel level, UUID commanderId) {
+        return Optional.empty();
+    }
+    default Optional<CompoundTag> packCommander(ServerLevel level, UUID commanderId) { return Optional.empty(); }
+    default void deployCommander(ServerLevel level, UUID commanderId, Vec3 anchor, CompoundTag packedCommander) {}
 }

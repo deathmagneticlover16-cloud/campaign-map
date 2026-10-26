@@ -15,6 +15,7 @@ import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.EntityJoinLevelEvent;
+import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.ModList;
@@ -38,6 +39,7 @@ public final class CampaignMapMod {
         MinecraftForge.EVENT_BUS.addListener(this::playerJoined);
         MinecraftForge.EVENT_BUS.addListener(this::serverTick);
         MinecraftForge.EVENT_BUS.addListener(this::entityJoined);
+        MinecraftForge.EVENT_BUS.addListener(this::entityDied);
         DistExecutor.safeRunWhenOn(Dist.CLIENT,
                 () -> () -> CampaignMapClient.register(FMLJavaModLoadingContext.get().getModEventBus()));
     }
@@ -45,6 +47,13 @@ public final class CampaignMapMod {
     private void entityJoined(EntityJoinLevelEvent event) {
         if (!event.getLevel().isClientSide() && event.getLevel() instanceof net.minecraft.server.level.ServerLevel level)
             CampaignGroupProviders.onEntityLoaded(level, event.getEntity(), CampaignArmyData.get(level));
+    }
+
+    private void entityDied(LivingDeathEvent event) {
+        if (!(event.getEntity().level() instanceof net.minecraft.server.level.ServerLevel level)) return;
+        CampaignArmyData data = CampaignArmyData.get(level);
+        if (data.hasCommander(event.getEntity().getUUID()))
+            data.markCommanderUnavailable(level, event.getEntity().getUUID()).ifPresent(CampaignNetwork::sendArmyUpdate);
     }
 
     private void registerCommands(RegisterCommandsEvent event) {

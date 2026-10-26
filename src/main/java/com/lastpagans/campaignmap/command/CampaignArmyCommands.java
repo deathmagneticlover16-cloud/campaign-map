@@ -30,9 +30,13 @@ public final class CampaignArmyCommands {
                         .then(Commands.literal("list")
                                 .executes(context -> list(context.getSource())))
                         .then(Commands.literal("create")
-                                .then(Commands.argument("name", StringArgumentType.greedyString())
-                                        .executes(context -> create(context.getSource(),
-                                                StringArgumentType.getString(context, "name")))))
+                                .then(Commands.argument("commander", StringArgumentType.word())
+                                        .then(Commands.argument("group", StringArgumentType.word())
+                                                .then(Commands.argument("name", StringArgumentType.greedyString())
+                                                        .executes(context -> create(context.getSource(),
+                                                                uuid(context.getArgument("commander", String.class)),
+                                                                uuid(context.getArgument("group", String.class)),
+                                                                StringArgumentType.getString(context, "name")))))))
                         .then(Commands.literal("info")
                                 .then(Commands.argument("army", StringArgumentType.word())
                                         .executes(context -> info(context.getSource(), uuid(context.getArgument("army", String.class))))))
@@ -54,6 +58,12 @@ public final class CampaignArmyCommands {
                                                 .executes(context -> removeGroup(context.getSource(),
                                                         uuid(context.getArgument("army", String.class)),
                                                         uuid(context.getArgument("group", String.class)))))))
+                        .then(Commands.literal("commander")
+                                .then(Commands.argument("army", StringArgumentType.word())
+                                        .then(Commands.argument("commander", StringArgumentType.word())
+                                                .executes(context -> appointCommander(context.getSource(),
+                                                        uuid(context.getArgument("army", String.class)),
+                                                        uuid(context.getArgument("commander", String.class)))))))
                         .then(Commands.literal("move")
                                 .then(Commands.argument("army", StringArgumentType.word())
                                         .then(Commands.argument("x", DoubleArgumentType.doubleArg())
@@ -109,10 +119,20 @@ public final class CampaignArmyCommands {
         return armies.size();
     }
 
-    private static int create(CommandSourceStack source, String name) throws CommandSyntaxException {
+    private static int create(CommandSourceStack source, UUID commanderId, UUID groupId, String name) throws CommandSyntaxException {
         ServerPlayer player = source.getPlayerOrException();
-        CampaignArmySnapshot army = CampaignArmyData.get(source.getLevel()).create(source.getLevel(), player.getUUID(),
-                name, player.getUUID(), new Vec3(player.getX(), 0.0, player.getZ()));
+        CampaignArmyData data = CampaignArmyData.get(source.getLevel());
+        if (data.isCommanderAssigned(commanderId)
+                || !com.lastpagans.campaignmap.api.army.CampaignGroupProviders.canCommand(
+                source.getLevel(), player.getUUID(), commanderId))
+            throw ARMY_ERROR.create("Select a living, owned Recruits commander who is not assigned to another army.");
+        if (data.isGroupAssigned(groupId)
+                || !com.lastpagans.campaignmap.api.army.CampaignGroupProviders.canManage(
+                source.getLevel(), player.getUUID(), groupId))
+            throw ARMY_ERROR.create("Select an owned Recruits group which is not assigned to another army.");
+        CampaignArmySnapshot army = data.create(source.getLevel(), player.getUUID(),
+                name, commanderId, new Vec3(player.getX(), 0.0, player.getZ()));
+        data.addGroup(source.getLevel(), army.armyId(), player.getUUID(), groupId, false);
         CampaignNetwork.sendArmyUpdate(army);
         source.sendSuccess(() -> Component.literal("Created " + army.armyName() + " [" + army.armyId() + "]."), true);
         return 1;
@@ -155,6 +175,17 @@ public final class CampaignArmyCommands {
         if (!data.removeGroup(armyId, groupId)) throw ARMY_ERROR.create("Army does not contain that group.");
         CampaignNetwork.sendArmyUpdate(data.snapshot(source.getLevel(), armyId).orElseThrow());
         source.sendSuccess(() -> Component.literal("Removed group " + groupId + " from army " + armyId + "."), true);
+        return 1;
+    }
+
+    private static int appointCommander(CommandSourceStack source, UUID armyId, UUID commanderId) throws CommandSyntaxException {
+        ServerPlayer player = source.getPlayerOrException();
+        requireManage(source, armyId);
+        CampaignArmySnapshot army = CampaignArmyData.get(source.getLevel())
+                .appointCommander(source.getLevel(), armyId, player.getUUID(), commanderId)
+                .orElseThrow(() -> ARMY_ERROR.create("That commander is unavailable, unowned, or already assigned."));
+        CampaignNetwork.sendArmyUpdate(army);
+        source.sendSuccess(() -> Component.literal("Appointed commander " + commanderId + " to " + army.armyName() + "."), true);
         return 1;
     }
 

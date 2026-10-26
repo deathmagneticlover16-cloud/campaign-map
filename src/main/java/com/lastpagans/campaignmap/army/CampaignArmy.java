@@ -3,6 +3,7 @@ package com.lastpagans.campaignmap.army;
 import com.lastpagans.campaignmap.api.army.ArmyState;
 import com.lastpagans.campaignmap.api.army.CampaignArmySnapshot;
 import com.lastpagans.campaignmap.api.army.CampaignGroupProviders;
+import com.lastpagans.campaignmap.api.army.CommanderVisualSnapshot;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.StringTag;
@@ -26,6 +27,9 @@ final class CampaignArmy {
     final UUID ownerId;
     String name;
     @Nullable UUID commanderId;
+    @Nullable CommanderVisualSnapshot commanderVisual;
+    boolean commanderAvailable;
+    @Nullable CompoundTag packedCommander;
     final List<UUID> groupIds = new ArrayList<>();
     ResourceLocation flagTexture = DEFAULT_FLAG;
     double flagAspectRatio = 1.5;
@@ -38,17 +42,21 @@ final class CampaignArmy {
     int transitionTicksTotal;
     final Map<UUID, ListTag> packedEntities = new LinkedHashMap<>();
 
-    CampaignArmy(UUID armyId, UUID ownerId, String name, @Nullable UUID commanderId, Vec3 position) {
+    CampaignArmy(UUID armyId, UUID ownerId, String name, @Nullable UUID commanderId,
+                 @Nullable CommanderVisualSnapshot commanderVisual, Vec3 position) {
         this.armyId = armyId;
         this.ownerId = ownerId;
         this.name = name;
         this.commanderId = commanderId;
+        this.commanderVisual = commanderVisual;
+        this.commanderAvailable = commanderId != null;
         this.position = position;
     }
 
     CampaignArmySnapshot snapshot(ServerLevel level) {
         int soldiers = groupIds.stream().mapToInt(group -> CampaignGroupProviders.soldierCount(level, group)).sum();
-        return new CampaignArmySnapshot(armyId, ownerId, name, commanderId, groupIds, flagTexture,
+        return new CampaignArmySnapshot(armyId, ownerId, name, commanderId, commanderVisual, commanderAvailable,
+                groupIds, flagTexture,
                 flagAspectRatio, position, path, state, foodSupplies, fatigue, soldiers,
                 transitionTicks, transitionTicksTotal);
     }
@@ -59,6 +67,15 @@ final class CampaignArmy {
         tag.putUUID("ownerId", ownerId);
         tag.putString("name", name);
         if (commanderId != null) tag.putUUID("commanderId", commanderId);
+        tag.putBoolean("commanderAvailable", commanderAvailable);
+        if (commanderVisual != null) {
+            CompoundTag visual = new CompoundTag();
+            visual.putString("entityType", commanderVisual.entityType().toString());
+            visual.putString("displayName", commanderVisual.displayName());
+            visual.put("appearance", commanderVisual.appearance());
+            tag.put("commanderVisual", visual);
+        }
+        if (packedCommander != null) tag.put("packedCommander", packedCommander.copy());
         ListTag groups = new ListTag();
         groupIds.forEach(group -> groups.add(StringTag.valueOf(group.toString())));
         tag.put("groups", groups);
@@ -89,9 +106,21 @@ final class CampaignArmy {
     }
 
     static CampaignArmy load(CompoundTag tag) {
+        CommanderVisualSnapshot commanderVisual = null;
+        if (tag.contains("commanderVisual", Tag.TAG_COMPOUND)) {
+            CompoundTag visual = tag.getCompound("commanderVisual");
+            ResourceLocation type = ResourceLocation.tryParse(visual.getString("entityType"));
+            if (type != null) commanderVisual = new CommanderVisualSnapshot(type,
+                    visual.getString("displayName"), visual.getCompound("appearance"));
+        }
         CampaignArmy army = new CampaignArmy(tag.getUUID("armyId"), tag.getUUID("ownerId"),
                 tag.getString("name"), tag.hasUUID("commanderId") ? tag.getUUID("commanderId") : null,
-                getVec(tag, "position"));
+                commanderVisual, getVec(tag, "position"));
+        army.commanderAvailable = tag.contains("commanderAvailable")
+                ? tag.getBoolean("commanderAvailable") : army.commanderId != null;
+        if (army.commanderVisual == null) army.commanderAvailable = false;
+        if (tag.contains("packedCommander", Tag.TAG_COMPOUND))
+            army.packedCommander = tag.getCompound("packedCommander").copy();
         for (Tag groupTag : tag.getList("groups", Tag.TAG_STRING)) {
             try { army.groupIds.add(UUID.fromString(groupTag.getAsString())); }
             catch (IllegalArgumentException ignored) {}

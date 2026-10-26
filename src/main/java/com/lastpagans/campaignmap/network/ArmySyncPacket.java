@@ -2,6 +2,7 @@ package com.lastpagans.campaignmap.network;
 
 import com.lastpagans.campaignmap.api.army.ArmyState;
 import com.lastpagans.campaignmap.api.army.CampaignArmySnapshot;
+import com.lastpagans.campaignmap.api.army.CommanderVisualSnapshot;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.phys.Vec3;
@@ -48,6 +49,13 @@ public record ArmySyncPacket(boolean replaceAll, List<CampaignArmySnapshot> armi
         buffer.writeUtf(army.armyName(), 64);
         buffer.writeBoolean(army.commanderId() != null);
         if (army.commanderId() != null) buffer.writeUUID(army.commanderId());
+        buffer.writeBoolean(army.commanderVisual() != null);
+        if (army.commanderVisual() != null) {
+            buffer.writeResourceLocation(army.commanderVisual().entityType());
+            buffer.writeUtf(army.commanderVisual().displayName(), 128);
+            buffer.writeNbt(army.commanderVisual().appearance());
+        }
+        buffer.writeBoolean(army.commanderAvailable());
         buffer.writeVarInt(army.groupIds().size());
         army.groupIds().forEach(buffer::writeUUID);
         buffer.writeResourceLocation(army.flagTexture());
@@ -68,6 +76,10 @@ public record ArmySyncPacket(boolean replaceAll, List<CampaignArmySnapshot> armi
         UUID ownerId = buffer.readUUID();
         String name = buffer.readUtf(64);
         UUID commanderId = buffer.readBoolean() ? buffer.readUUID() : null;
+        CommanderVisualSnapshot commanderVisual = null;
+        if (buffer.readBoolean()) commanderVisual = new CommanderVisualSnapshot(buffer.readResourceLocation(),
+                buffer.readUtf(128), java.util.Objects.requireNonNullElseGet(buffer.readNbt(), net.minecraft.nbt.CompoundTag::new));
+        boolean commanderAvailable = buffer.readBoolean();
         int groupCount = checkedCount(buffer.readVarInt());
         List<UUID> groups = new ArrayList<>(groupCount);
         for (int i = 0; i < groupCount; i++) groups.add(buffer.readUUID());
@@ -83,7 +95,8 @@ public record ArmySyncPacket(boolean replaceAll, List<CampaignArmySnapshot> armi
         int soldiers = buffer.readVarInt();
         int transitionRemaining = buffer.readVarInt();
         int transitionTotal = buffer.readVarInt();
-        return new CampaignArmySnapshot(armyId, ownerId, name, commanderId, groups, texture, aspect,
+        return new CampaignArmySnapshot(armyId, ownerId, name, commanderId, commanderVisual, commanderAvailable,
+                groups, texture, aspect,
                 position, path, state, food, fatigue, soldiers, transitionRemaining, transitionTotal);
     }
 

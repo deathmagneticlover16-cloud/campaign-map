@@ -7,6 +7,7 @@ import com.lastpagans.campaignmap.api.army.CampaignArmySnapshot;
 import com.lastpagans.campaignmap.client.army.CampaignBannerRenderer;
 import com.lastpagans.campaignmap.client.army.ClientArmyCache;
 import com.lastpagans.campaignmap.client.army.ClientGroupCatalog;
+import com.lastpagans.campaignmap.client.army.MountedCommanderRenderer;
 import com.lastpagans.campaignmap.geography.MapProjection;
 import com.lastpagans.campaignmap.geography.ProvincePixelMap;
 import com.lastpagans.campaignmap.geography.ProvinceRegistry;
@@ -38,6 +39,7 @@ public final class CampaignMapScreen extends Screen {
     private ResourceLocation overlayLocation;
     private final CampaignCamera3D camera = new CampaignCamera3D();
     private final CampaignBannerRenderer bannerRenderer = new CampaignBannerRenderer();
+    private final MountedCommanderRenderer mountedCommanderRenderer = new MountedCommanderRenderer();
     private boolean cameraInitialized;
     private boolean dragging;
     private boolean orbiting;
@@ -45,7 +47,10 @@ public final class CampaignMapScreen extends Screen {
     private boolean politicalMode = true;
     private boolean armyManagementMode;
     private int groupListOffset;
+    private int commanderListOffset;
     private final java.util.Set<java.util.UUID> pendingGroups = new java.util.LinkedHashSet<>();
+    @Nullable private java.util.UUID pendingCommander;
+    @Nullable private java.util.UUID appointingArmy;
     private long previousFrameNanos;
     private double animationSeconds;
     private long renderedRevision = -1;
@@ -119,6 +124,7 @@ public final class CampaignMapScreen extends Screen {
         renderMapTextures(graphics);
         renderLabels(graphics);
         java.util.UUID localPlayer = minecraft.player == null ? null : minecraft.player.getUUID();
+        mountedCommanderRenderer.render(graphics, camera, animationSeconds, partialTick);
         bannerRenderer.render(graphics, camera, selectedArmy, localPlayer, animationSeconds);
         graphics.disableScissor();
         renderPanel(graphics);
@@ -165,7 +171,8 @@ public final class CampaignMapScreen extends Screen {
         graphics.drawString(font, title, left + 14, 15, 0xFFFFDDA0, false);
         graphics.drawString(font, politicalMode ? "POLITICAL MAP" : "TERRAIN MAP", left + 14, 31, 0xFFAEB8C4, false);
         if (armyManagementMode) {
-            renderArmyCreationPanel(graphics, left);
+            if (appointingArmy != null) renderCommanderAppointmentPanel(graphics, left);
+            else renderArmyCreationPanel(graphics, left);
             return;
         }
         java.util.UUID shownArmyId = selectedArmy != null ? selectedArmy : hoveredArmy;
@@ -196,12 +203,34 @@ public final class CampaignMapScreen extends Screen {
 
     private void renderArmyCreationPanel(GuiGraphics graphics, int left) {
         graphics.drawString(font, "CREATE CAMPAIGN ARMY", left + 14, 58, 0xFFFFDDA0, false);
-        graphics.drawString(font, "Select available Recruits groups:", left + 14, 74, 0xFFAEB8C4, false);
+        graphics.drawString(font, "1. Select a Recruits commander", left + 14, 74, 0xFFAEB8C4, false);
+        java.util.Set<java.util.UUID> assignedCommanders = new java.util.HashSet<>();
+        ClientArmyCache.entries().forEach(entry -> {
+            if (entry.snapshot().commanderId() != null) assignedCommanders.add(entry.snapshot().commanderId());
+        });
+        int commanderY = 91;
+        int commanderRows = Math.min(3, ClientGroupCatalog.commanders().size());
+        for (int i = 0; i < commanderRows; i++) {
+            int commanderIndex = commanderListOffset + i;
+            if (commanderIndex >= ClientGroupCatalog.commanders().size()) break;
+            var commander = ClientGroupCatalog.commanders().get(commanderIndex);
+            boolean unavailable = assignedCommanders.contains(commander.commanderId());
+            boolean selected = commander.commanderId().equals(pendingCommander);
+            graphics.fill(left + 10, commanderY - 3, width - 10, commanderY + 15,
+                    unavailable ? 0x55343434 : selected ? 0xAA31596A : 0x88303842);
+            graphics.drawString(font, font.plainSubstrByWidth(commander.name(), PANEL_WIDTH - 30), left + 14,
+                    commanderY, unavailable ? 0xFF777777 : selected ? 0xFF8DEAFF : 0xFFE7E9EC, false);
+            commanderY += 20;
+        }
+        if (ClientGroupCatalog.commanders().isEmpty())
+            graphics.drawString(font, "No available Recruits commanders", left + 14, commanderY, 0xFFFF8888, false);
+        int groupTitleY = creationGroupStartY();
+        graphics.drawString(font, "2. Select groups", left + 14, groupTitleY - 17, 0xFFAEB8C4, false);
         java.util.Set<java.util.UUID> assigned = new java.util.HashSet<>();
         ClientArmyCache.entries().forEach(entry -> assigned.addAll(entry.snapshot().groupIds()));
-        int y = 91;
+        int y = groupTitleY;
         int shown = 0;
-        int maxRows = Math.max(1, (height - 160) / 22);
+        int maxRows = creationGroupRows();
         for (var group : ClientGroupCatalog.groups().stream().skip(groupListOffset).toList()) {
             if (shown >= maxRows) break;
             boolean unavailable = assigned.contains(group.groupId());
@@ -227,9 +256,28 @@ public final class CampaignMapScreen extends Screen {
         if (!armyManagementMode || mouseX < left) return false;
         java.util.Set<java.util.UUID> assigned = new java.util.HashSet<>();
         ClientArmyCache.entries().forEach(entry -> assigned.addAll(entry.snapshot().groupIds()));
-        int y = 91;
+        java.util.Set<java.util.UUID> assignedCommanders = new java.util.HashSet<>();
+        ClientArmyCache.entries().forEach(entry -> {
+            if (entry.snapshot().commanderId() != null) assignedCommanders.add(entry.snapshot().commanderId());
+        });
+        int commanderY = 91;
+        for (var commander : ClientGroupCatalog.commanders().stream().skip(commanderListOffset).limit(3).toList()) {
+            if (mouseY >= commanderY - 3 && mouseY < commanderY + 17
+                    && !assignedCommanders.contains(commander.commanderId())) {
+                if (appointingArmy != null) {
+                    CampaignNetwork.requestCommander(appointingArmy, commander.commanderId());
+                    appointingArmy = null;
+                    armyManagementMode = false;
+                    return true;
+                }
+                pendingCommander = commander.commanderId();
+                return true;
+            }
+            commanderY += 20;
+        }
+        int y = creationGroupStartY();
         int shown = 0;
-        int maxRows = Math.max(1, (height - 160) / 22);
+        int maxRows = creationGroupRows();
         for (var group : ClientGroupCatalog.groups().stream().skip(groupListOffset).toList()) {
             if (shown >= maxRows) break;
             if (mouseY >= y - 3 && mouseY < y + 18 && !assigned.contains(group.groupId())) {
@@ -251,7 +299,7 @@ public final class CampaignMapScreen extends Screen {
         graphics.drawString(font, "ARMY STATUS", left + 14, y, 0xFF8D744B, false);
         y += 17;
         y = statRow(graphics, left, y, "State", stateLabel(army));
-        y = statRow(graphics, left, y, "Commander", playerName(army.commanderId()));
+        y = statRow(graphics, left, y, "Commander", commanderName(army));
         y = statRow(graphics, left, y, "Strength", army.totalSoldiers() + " soldiers");
         y = statRow(graphics, left, y, "Groups", Integer.toString(army.groupIds().size()));
         y = statRow(graphics, left, y, "Supplies", Integer.toString(army.foodSupplies()));
@@ -267,14 +315,14 @@ public final class CampaignMapScreen extends Screen {
         }
     }
 
-    private String playerName(@Nullable java.util.UUID playerId) {
-        if (playerId == null) return "Unassigned";
-        var connection = minecraft.getConnection();
-        var info = connection == null ? null : connection.getPlayerInfo(playerId);
-        return info == null ? "Offline commander" : info.getProfile().getName();
+    private String commanderName(CampaignArmySnapshot army) {
+        if (army.commanderId() == null || army.commanderVisual() == null) return "Leaderless";
+        return army.commanderAvailable() ? army.commanderVisual().displayName()
+                : "Leaderless (" + army.commanderVisual().displayName() + ")";
     }
 
     private static String stateLabel(CampaignArmySnapshot army) {
+        if (!army.commanderAvailable()) return "Leaderless";
         return switch (army.state()) {
             case RETREATING -> "Preparing to move";
             case MOVING -> army.movementPath().isEmpty() ? "Awaiting orders" : "Marching";
@@ -292,10 +340,10 @@ public final class CampaignMapScreen extends Screen {
 
     private void syncArmyControls() {
         hideArmyControls();
-        createArmyButton.visible = armyManagementMode;
-        createArmyButton.active = !pendingGroups.isEmpty();
-        createArmyButton.setMessage(Component.literal(pendingGroups.isEmpty()
-                ? "SELECT GROUPS" : "CREATE ARMY (" + pendingGroups.size() + ")"));
+        createArmyButton.visible = armyManagementMode && appointingArmy == null;
+        createArmyButton.active = pendingCommander != null && !pendingGroups.isEmpty();
+        createArmyButton.setMessage(Component.literal(pendingCommander == null ? "SELECT COMMANDER"
+                : pendingGroups.isEmpty() ? "SELECT GROUPS" : "CREATE ARMY (" + pendingGroups.size() + ")"));
         if (armyManagementMode || selectedArmy == null || minecraft.player == null) return;
         ClientArmyCache.Entry entry = ClientArmyCache.get(selectedArmy).orElse(null);
         if (entry == null || !entry.snapshot().ownerId().equals(minecraft.player.getUUID())) return;
@@ -307,6 +355,11 @@ public final class CampaignMapScreen extends Screen {
         if (!army.armyId().equals(editedArmy)) {
             editedArmy = army.armyId();
             armyNameInput.setValue(army.armyName());
+        }
+        if (!army.commanderAvailable()) {
+            armyActionButton.active = true;
+            armyActionButton.setMessage(Component.literal("APPOINT A COMMANDER"));
+            return;
         }
         switch (army.state()) {
             case DEPLOYED, STATIONARY -> {
@@ -345,6 +398,13 @@ public final class CampaignMapScreen extends Screen {
     private void runArmyAction() {
         if (selectedArmy == null) return;
         ClientArmyCache.get(selectedArmy).ifPresent(entry -> {
+            if (!entry.snapshot().commanderAvailable()) {
+                appointingArmy = selectedArmy;
+                armyManagementMode = true;
+                commanderListOffset = 0;
+                CampaignNetwork.requestGroupCatalog();
+                return;
+            }
             switch (entry.snapshot().state()) {
                 case DEPLOYED, STATIONARY -> CampaignNetwork.requestMovementMode(selectedArmy);
                 case MOVING -> CampaignNetwork.requestDeployment(selectedArmy);
@@ -354,11 +414,12 @@ public final class CampaignMapScreen extends Screen {
     }
 
     private void createSelectedArmy() {
-        if (pendingGroups.isEmpty()) return;
+        if (pendingCommander == null || pendingGroups.isEmpty()) return;
         String name = ClientGroupCatalog.groups().stream().filter(group -> pendingGroups.contains(group.groupId()))
                 .findFirst().map(group -> group.name() + " Army").orElse("New Army");
-        CampaignNetwork.requestArmyCreation(name, java.util.List.copyOf(pendingGroups));
+        CampaignNetwork.requestArmyCreation(name, pendingCommander, java.util.List.copyOf(pendingGroups));
         pendingGroups.clear();
+        pendingCommander = null;
         armyManagementMode = false;
     }
 
@@ -524,7 +585,13 @@ public final class CampaignMapScreen extends Screen {
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double amount) {
         if (armyManagementMode && mouseX >= width - PANEL_WIDTH) {
-            int maxRows = Math.max(1, (height - 160) / 22);
+            if (appointingArmy != null || mouseY < creationGroupStartY()) {
+                int maxOffset = Math.max(0, ClientGroupCatalog.commanders().size() - 3);
+                commanderListOffset = Math.max(0, Math.min(maxOffset,
+                        commanderListOffset + (amount < 0 ? 1 : -1)));
+                return true;
+            }
+            int maxRows = creationGroupRows();
             int maxOffset = Math.max(0, ClientGroupCatalog.groups().size() - maxRows);
             groupListOffset = Math.max(0, Math.min(maxOffset, groupListOffset + (amount < 0 ? 1 : -1)));
             return true;
@@ -557,6 +624,9 @@ public final class CampaignMapScreen extends Screen {
             armyManagementMode = !armyManagementMode;
             if (armyManagementMode) {
                 groupListOffset = 0;
+                commanderListOffset = 0;
+                pendingCommander = null;
+                appointingArmy = null;
                 CampaignNetwork.requestGroupCatalog();
             }
             return true;
@@ -571,6 +641,33 @@ public final class CampaignMapScreen extends Screen {
     @Override
     public boolean isPauseScreen() {
         return false;
+    }
+
+    private int creationGroupStartY() {
+        return 112 + Math.min(3, ClientGroupCatalog.commanders().size()) * 20;
+    }
+
+    private int creationGroupRows() {
+        return Math.max(1, (height - creationGroupStartY() - 70) / 22);
+    }
+
+    private void renderCommanderAppointmentPanel(GuiGraphics graphics, int left) {
+        graphics.drawString(font, "APPOINT COMMANDER", left + 14, 58, 0xFFFFDDA0, false);
+        graphics.drawString(font, "Select an available Recruits commander", left + 14, 74, 0xFFAEB8C4, false);
+        int y = 91;
+        java.util.Set<java.util.UUID> assigned = new java.util.HashSet<>();
+        ClientArmyCache.entries().forEach(entry -> {
+            if (entry.snapshot().commanderId() != null) assigned.add(entry.snapshot().commanderId());
+        });
+        for (var commander : ClientGroupCatalog.commanders().stream().skip(commanderListOffset).limit(3).toList()) {
+            boolean unavailable = assigned.contains(commander.commanderId());
+            graphics.fill(left + 10, y - 3, width - 10, y + 15, unavailable ? 0x55343434 : 0x88303842);
+            graphics.drawString(font, font.plainSubstrByWidth(commander.name(), PANEL_WIDTH - 30),
+                    left + 14, y, unavailable ? 0xFF777777 : 0xFFE7E9EC, false);
+            y += 20;
+        }
+        if (ClientGroupCatalog.commanders().isEmpty())
+            graphics.drawString(font, "No available Recruits commanders", left + 14, y, 0xFFFF8888, false);
     }
 
     @Override

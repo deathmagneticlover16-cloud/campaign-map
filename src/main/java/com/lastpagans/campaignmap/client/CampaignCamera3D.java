@@ -119,6 +119,7 @@ public final class CampaignCamera3D {
 
     public Vec3 right() { return right; }
     public Vec3 forward() { return forward; }
+    public double pixelsPerMapUnit(double depth) { return depth <= 0.5 ? 0.0 : focalLength() / depth; }
 
     private void rebuildBasis() {
         double cosPitch = Math.cos(pitch);

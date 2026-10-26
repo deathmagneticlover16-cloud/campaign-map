@@ -14,4 +14,8 @@
 
 `CampaignMapScreen` renders the frontend terrain, cached political tint, derived province/national borders, labels, hover/selection highlight, and information panel. Its dynamic overlay rebuilds only when synchronized politics or hover/selection changes. Mouse selection uses screen → map-local → image-pixel coordinates and remains correct while panning and zooming.
 
+`CampaignArmyData` owns strategic army position and movement. Every army has one real Recruits commander UUID. The commander is selected and validated before army creation, packed as the same persistent entity for strategic movement, and restored during deployment. `CommanderVisualSnapshot` contains only the commander entity type and visible appearance/equipment fields needed by clients.
+
+`MountedCommanderRenderer` creates render-only client proxies which are never added to the level. It routes the commander through the Recruits entity renderer and the mount through the horse renderer supplied by Icy's Better Horses. Interpolated campaign velocity drives model gait and facing; neither proxy can run AI or influence authoritative movement.
+
 The current resources are bundled for a self-contained prototype. A future version can move definitions and province-image loading behind a datapack/resource reload layer without changing API consumers or ownership save data.
