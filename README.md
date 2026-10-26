@@ -1,12 +1,14 @@
 # Last Pagans Campaign Map
 
-Forge 1.20.1 mod providing an authoritative pixel-based province system and fullscreen political campaign map.
+Forge 1.20.1 mod providing an authoritative province system, a smooth 3D campaign view, and persistent campaign armies backed by Recruits groups.
 
 ## Use
 
 - Press **M** to open the campaign map.
 - Left-click a province to select it.
-- Use the mouse wheel to zoom and right-drag to pan.
+- Use the mouse wheel to zoom, right-drag to pan, and middle-drag to angle the camera.
+- Select an army banner and right-click the map to issue a server-authoritative movement order.
+- Press **A** to open army management and create an army from your available Recruits groups.
 - Press **P** inside the map to toggle the political tint layer.
 - Press **Esc** to close the map.
 
@@ -38,6 +40,8 @@ Black is reserved as unassigned by `unassignedRgb`, unless a future configuratio
 
 Mutation commands require permission level 2. Ownership and control are world SavedData, survive restarts, and synchronize from the server on join and after changes.
 
+Army commands are available under `/campaignmap army`: `list`, `create`, `info`, `rename`, `addgroup`, `removegroup`, `move`, and `delete`. Army records have their own UUIDs and store only campaign state and Recruits group UUID references. Recruits remains the authority for groups and soldiers, and one group can belong to only one campaign army.
+
 ## External mod API
 
 Use the dedicated-server-safe classes under `com.lastpagans.campaignmap.api`:
@@ -49,9 +53,15 @@ CampaignMapAPI.getProvince(provinceId);
 CampaignMapAPI.getOwner(serverLevel, provinceId);
 CampaignMapAPI.getController(serverLevel, provinceId);
 CampaignMapAPI.getNeighbours(provinceId);
+
+CampaignArmyAPI.getArmy(serverLevel, armyId);
+CampaignArmyAPI.getArmies(serverLevel);
+CampaignArmyAPI.getArmyForGroup(serverLevel, groupId);
 ```
 
 Geography is immutable map data. Political ownership and military control are separate dynamic data. External mods do not need to depend on GUI or texture classes.
+
+The Recruits dependency is optional at runtime. When Recruits is present, the adapter reads its persistent groups directly for owner checks, names, and soldier totals. The bundled `libs/recruits.jar` is compile-only and is not packaged into Campaign Map.
 
 ## Build
 

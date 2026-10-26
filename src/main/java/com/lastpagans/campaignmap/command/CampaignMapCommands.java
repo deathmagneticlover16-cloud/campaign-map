@@ -61,6 +61,7 @@ public final class CampaignMapCommands {
                         .then(Commands.argument("province", ResourceLocationArgument.id())
                                 .executes(context -> clearIdentity(context.getSource(),
                                         ResourceLocationArgument.getId(context, "province"), false)))));
+        CampaignArmyCommands.register(dispatcher);
     }
 
     private static int list(CommandSourceStack source) {
