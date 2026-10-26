@@ -25,7 +25,7 @@ import java.util.List;
 import java.util.function.Supplier;
 
 public final class CampaignNetwork {
-    private static final String PROTOCOL = "3";
+    private static final String PROTOCOL = "4";
     private static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(CampaignMapMod.MOD_ID, "main"), () -> PROTOCOL, PROTOCOL::equals, PROTOCOL::equals);
 

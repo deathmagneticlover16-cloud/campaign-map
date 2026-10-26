@@ -9,6 +9,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.entity.Entity;
 import com.lastpagans.campaignmap.army.CampaignArmyData;
+import net.minecraft.nbt.ListTag;
 
 public final class CampaignGroupProviders {
     private static final List<CampaignGroupProvider> PROVIDERS = new CopyOnWriteArrayList<>();
@@ -42,13 +43,13 @@ public final class CampaignGroupProviders {
                 .map(provider -> provider.groupName(level, groupId)).findFirst().orElse("Unknown group");
     }
 
-    public static void deploy(ServerLevel level, UUID groupId, Vec3 anchor) {
+    public static void deploy(ServerLevel level, UUID groupId, Vec3 anchor, ListTag packedEntities) {
         PROVIDERS.stream().filter(provider -> provider.recognizes(level, groupId)).findFirst()
-                .ifPresent(provider -> provider.deploy(level, groupId, anchor));
+                .ifPresent(provider -> provider.deploy(level, groupId, anchor, packedEntities));
     }
-    public static void pack(ServerLevel level, UUID groupId) {
-        PROVIDERS.stream().filter(provider -> provider.recognizes(level, groupId)).findFirst()
-                .ifPresent(provider -> provider.pack(level, groupId));
+    public static ListTag pack(ServerLevel level, UUID groupId) {
+        return PROVIDERS.stream().filter(provider -> provider.recognizes(level, groupId)).findFirst()
+                .map(provider -> provider.pack(level, groupId)).orElseGet(ListTag::new);
     }
 
     public static void onEntityLoaded(ServerLevel level, Entity entity, CampaignArmyData armies) {

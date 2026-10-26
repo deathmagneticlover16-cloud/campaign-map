@@ -12,6 +12,10 @@ import java.util.UUID;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.entity.Entity;
 import com.talhanation.recruits.entities.AbstractRecruitEntity;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.Tag;
+import net.minecraft.world.entity.EntityType;
 
 /** Optional adapter over Recruits' authoritative persistent group records. */
 public final class RecruitsCampaignGroupProvider implements CampaignGroupProvider {
@@ -39,9 +43,18 @@ public final class RecruitsCampaignGroupProvider implements CampaignGroupProvide
     }
 
     @Override
-    public void deploy(ServerLevel level, UUID groupId, Vec3 anchor) {
+    public void deploy(ServerLevel level, UUID groupId, Vec3 anchor, ListTag packedEntities) {
         RecruitsGroup group = find(level, groupId);
         if (group == null || group.members == null) return;
+        int[] restoredIndex = {0};
+        for (Tag raw : packedEntities) {
+            if (!(raw instanceof CompoundTag entityTag)) continue;
+            Entity restored = EntityType.loadEntityRecursive(entityTag, level, entity -> {
+                place(level, entity, anchor, restoredIndex[0]++);
+                return entity;
+            });
+            if (restored != null) level.addFreshEntityWithPassengers(restored);
+        }
         int index = 0;
         for (UUID member : group.members) {
             Entity entity = null;
@@ -50,34 +63,33 @@ public final class RecruitsCampaignGroupProvider implements CampaignGroupProvide
                 if (entity != null) break;
             }
             if (entity == null || !entity.isAlive()) continue;
-            if (entity instanceof AbstractRecruitEntity recruit) {
-                recruit.setNoAi(false); recruit.setInvisible(false); recruit.setInvulnerable(false);
-            }
-            double x = anchor.x + (index % 8) * 2.0;
-            double z = anchor.z + (index / 8) * 2.0;
-            double y = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
-                    net.minecraft.util.Mth.floor(x), net.minecraft.util.Mth.floor(z));
             if (entity.level() != level) {
                 Entity moved = entity.changeDimension(level);
                 if (moved == null) continue;
                 entity = moved;
             }
-            entity.teleportTo(x, y, z);
+            place(level, entity, anchor, index);
             index++;
         }
     }
 
     @Override
-    public void pack(ServerLevel level, UUID groupId) {
+    public ListTag pack(ServerLevel level, UUID groupId) {
+        ListTag packed = new ListTag();
         RecruitsGroup group = find(level, groupId);
-        if (group == null || group.members == null) return;
+        if (group == null || group.members == null) return packed;
         for (UUID member : group.members) for (ServerLevel candidate : level.getServer().getAllLevels()) {
             Entity entity = candidate.getEntity(member);
             if (entity instanceof AbstractRecruitEntity recruit) {
-                recruit.setNoAi(true); recruit.setInvisible(true); recruit.setInvulnerable(true);
+                CompoundTag tag = new CompoundTag();
+                if (recruit.save(tag)) {
+                    packed.add(tag);
+                    recruit.discard();
+                }
                 break;
             }
         }
+        return packed;
     }
 
     @Override
@@ -85,18 +97,20 @@ public final class RecruitsCampaignGroupProvider implements CampaignGroupProvide
         if (!(entity instanceof AbstractRecruitEntity recruit) || recruit.getGroup() == null) return;
         var state = armies.stateForGroup(recruit.getGroup()).orElse(null);
         if (state != com.lastpagans.campaignmap.api.army.ArmyState.DEPLOYED) {
-            if (state != null) { recruit.setNoAi(true); recruit.setInvisible(true); recruit.setInvulnerable(true); }
+            if (state != null) {
+                CompoundTag tag = new CompoundTag();
+                if (recruit.save(tag)) {
+                    armies.addPackedEntity(recruit.getGroup(), tag);
+                    recruit.discard();
+                }
+            }
             return;
         }
-        recruit.setNoAi(false); recruit.setInvisible(false); recruit.setInvulnerable(false);
         Vec3 anchor = armies.deployedAnchor(recruit.getGroup()).orElse(null);
         if (anchor == null) return;
         RecruitsGroup group = find(level, recruit.getGroup());
         int index = group == null || group.members == null ? 0 : Math.max(0, group.members.indexOf(recruit.getUUID()));
-        double x = anchor.x + (index % 8) * 2.0, z = anchor.z + (index / 8) * 2.0;
-        double y = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
-                net.minecraft.util.Mth.floor(x), net.minecraft.util.Mth.floor(z));
-        recruit.teleportTo(x, y, z);
+        place(level, recruit, anchor, index);
     }
 
     @Override
@@ -115,5 +129,17 @@ public final class RecruitsCampaignGroupProvider implements CampaignGroupProvide
             if (group != null && !group.removed && groupId.equals(group.getUUID())) return group;
         }
         return null;
+    }
+
+    private static void place(ServerLevel level, Entity entity, Vec3 anchor, int index) {
+        if (entity instanceof AbstractRecruitEntity recruit) {
+            recruit.setNoAi(false);
+            recruit.setInvisible(false);
+            recruit.setInvulnerable(false);
+        }
+        double x = anchor.x + (index % 8) * 2.0, z = anchor.z + (index / 8) * 2.0;
+        double y = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
+                net.minecraft.util.Mth.floor(x), net.minecraft.util.Mth.floor(z));
+        entity.teleportTo(x, y, z);
     }
 }

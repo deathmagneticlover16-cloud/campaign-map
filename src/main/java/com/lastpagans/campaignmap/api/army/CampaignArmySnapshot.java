@@ -20,7 +20,9 @@ public record CampaignArmySnapshot(UUID armyId,
                                    ArmyState state,
                                    int foodSupplies,
                                    double fatigue,
-                                   int totalSoldiers) {
+                                   int totalSoldiers,
+                                   int transitionTicksRemaining,
+                                   int transitionTicksTotal) {
     public CampaignArmySnapshot {
         groupIds = List.copyOf(groupIds);
         movementPath = List.copyOf(movementPath);

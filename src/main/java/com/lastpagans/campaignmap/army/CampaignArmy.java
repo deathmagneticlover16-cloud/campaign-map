@@ -15,6 +15,8 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 final class CampaignArmy {
     static final ResourceLocation DEFAULT_FLAG = new ResourceLocation("recruits_rts_camera",
@@ -33,6 +35,8 @@ final class CampaignArmy {
     int foodSupplies;
     double fatigue;
     int transitionTicks;
+    int transitionTicksTotal;
+    final Map<UUID, ListTag> packedEntities = new LinkedHashMap<>();
 
     CampaignArmy(UUID armyId, UUID ownerId, String name, @Nullable UUID commanderId, Vec3 position) {
         this.armyId = armyId;
@@ -45,7 +49,8 @@ final class CampaignArmy {
     CampaignArmySnapshot snapshot(ServerLevel level) {
         int soldiers = groupIds.stream().mapToInt(group -> CampaignGroupProviders.soldierCount(level, group)).sum();
         return new CampaignArmySnapshot(armyId, ownerId, name, commanderId, groupIds, flagTexture,
-                flagAspectRatio, position, path, state, foodSupplies, fatigue, soldiers);
+                flagAspectRatio, position, path, state, foodSupplies, fatigue, soldiers,
+                transitionTicks, transitionTicksTotal);
     }
 
     CompoundTag save() {
@@ -71,6 +76,15 @@ final class CampaignArmy {
         tag.putInt("foodSupplies", foodSupplies);
         tag.putDouble("fatigue", fatigue);
         tag.putInt("transitionTicks", transitionTicks);
+        tag.putInt("transitionTicksTotal", transitionTicksTotal);
+        ListTag packed = new ListTag();
+        packedEntities.forEach((groupId, entities) -> {
+            CompoundTag entry = new CompoundTag();
+            entry.putUUID("group", groupId);
+            entry.put("entities", entities.copy());
+            packed.add(entry);
+        });
+        tag.put("packedEntities", packed);
         return tag;
     }
 
@@ -93,8 +107,11 @@ final class CampaignArmy {
         army.foodSupplies = Math.max(0, tag.getInt("foodSupplies"));
         army.fatigue = Math.max(0.0, tag.getDouble("fatigue"));
         army.transitionTicks = Math.max(0, tag.getInt("transitionTicks"));
-        if (army.path.isEmpty() && army.state == ArmyState.MOVING) {
-            army.state = ArmyState.STATIONARY;
+        army.transitionTicksTotal = Math.max(army.transitionTicks, tag.getInt("transitionTicksTotal"));
+        for (Tag raw : tag.getList("packedEntities", Tag.TAG_COMPOUND)) {
+            CompoundTag entry = (CompoundTag) raw;
+            if (entry.hasUUID("group")) army.packedEntities.put(entry.getUUID("group"),
+                    (ListTag) entry.getList("entities", Tag.TAG_COMPOUND).copy());
         }
         return army;
     }

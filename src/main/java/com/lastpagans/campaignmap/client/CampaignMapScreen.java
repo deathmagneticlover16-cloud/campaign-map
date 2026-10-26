@@ -243,8 +243,13 @@ public final class CampaignMapScreen extends Screen {
                 army.campaignPosition().x, army.campaignPosition().z));
         if (selectedArmy != null) {
             boolean ready = army.state() == com.lastpagans.campaignmap.api.army.ArmyState.MOVING;
-            graphics.fill(left + 14, height - 66, width - 14, height - 44, ready ? 0xFF31596A : 0xFF8D744B);
-            graphics.drawCenteredString(font, ready ? "RIGHT-CLICK MAP TO MOVE" : "PREPARE TO MOVE",
+            boolean transitioning = army.state() == com.lastpagans.campaignmap.api.army.ArmyState.RETREATING
+                    || army.state() == com.lastpagans.campaignmap.api.army.ArmyState.DEPLOYING;
+            String action = ready ? "RIGHT-CLICK MAP TO MOVE"
+                    : transitioning ? transitionText(army) : "PREPARE TO MOVE";
+            graphics.fill(left + 14, height - 66, width - 14, height - 44,
+                    ready ? 0xFF31596A : transitioning ? 0xFF4A4D52 : 0xFF8D744B);
+            graphics.drawCenteredString(font, action,
                     left + PANEL_WIDTH / 2, height - 59, 0xFFFFFFFF);
         }
     }
@@ -264,6 +269,12 @@ public final class CampaignMapScreen extends Screen {
             case DEPLOYED -> "Deployed";
             case STATIONARY -> "Stationary";
         };
+    }
+
+    private static String transitionText(CampaignArmySnapshot army) {
+        int seconds = Math.max(0, (army.transitionTicksRemaining() + 19) / 20);
+        return (army.state() == com.lastpagans.campaignmap.api.army.ArmyState.RETREATING
+                ? "PACKING" : "DEPLOYING") + " • " + seconds + "s";
     }
 
     private String groupNames(CampaignArmySnapshot army) {

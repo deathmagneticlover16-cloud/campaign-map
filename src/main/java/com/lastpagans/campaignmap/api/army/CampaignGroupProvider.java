@@ -7,6 +7,7 @@ import java.util.List;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.entity.Entity;
 import com.lastpagans.campaignmap.army.CampaignArmyData;
+import net.minecraft.nbt.ListTag;
 
 /**
  * Integration point for Recruits RTS or another tactical-group owner.
@@ -22,8 +23,8 @@ public interface CampaignGroupProvider {
     default String groupName(ServerLevel level, UUID groupId) { return groupId.toString(); }
 
     /** Places the real tactical group after campaign deployment completes. */
-    default void deploy(ServerLevel level, UUID groupId, Vec3 anchor) {}
-    default void pack(ServerLevel level, UUID groupId) {}
+    default void deploy(ServerLevel level, UUID groupId, Vec3 anchor, ListTag packedEntities) {}
+    default ListTag pack(ServerLevel level, UUID groupId) { return new ListTag(); }
 
     default void onEntityLoaded(ServerLevel level, Entity entity, CampaignArmyData armies) {}
 
