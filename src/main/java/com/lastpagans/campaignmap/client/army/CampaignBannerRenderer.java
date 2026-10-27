@@ -26,8 +26,8 @@ public final class CampaignBannerRenderer {
     private static final ResourceLocation FALLBACK_TEXTURE = new ResourceLocation(CampaignMapMod.MOD_ID,
             "textures/misc/default_army_banner.png");
     private static final int STRIPS = 8;
-    private static final double FLAG_WIDTH = 17.0;
-    private static final double BANNER_HEIGHT = 6.0;
+    private static final double FLAG_WIDTH = 25.0;
+    private static final double BANNER_HEIGHT = 13.0;
 
     public void render(GuiGraphics graphics, CampaignCamera3D camera, @Nullable UUID selectedArmy,
                        @Nullable UUID localPlayer, double animationSeconds) {

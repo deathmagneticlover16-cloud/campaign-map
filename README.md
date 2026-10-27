@@ -45,7 +45,7 @@ Army commands are available under `/campaignmap army`: `list`, `create`, `info`,
 
 Player-facing customization uses army names: `/map rename "Army Name" New Name` and `/map setflag "Army Name"`. The latter opens Immersive Paintings' actual browser and stores the chosen painting separately from Recruits group flags.
 
-Creating an army now requires selecting a real, owned Recruits commander before selecting its groups. Strategic movement packs and restores that same commander UUID. The campaign scene reconstructs only a client-side visual proxy from the commander's model, appearance and visible equipment, mounts it on the horse entity rendered by Icy's Better Horses, and drives both renderers from the army's interpolated campaign movement. The proxies are never added to a level and never run AI.
+Creating an army now requires selecting a real, owned Recruits commander before selecting its groups. Strategic movement packs and restores that same commander UUID. The campaign scene reconstructs only a client-side visual proxy from the commander's model, appearance and visible equipment, mounts it on Icy's Better Horses 2.1.6 `mustang_horse`, and drives both real entity renderers from the army's interpolated campaign movement. The proxies are never added to a level and never run AI.
 
 ## External mod API
 
@@ -76,4 +76,4 @@ Use Java 17 or a Gradle toolchain capable of obtaining Java 17:
 ./gradlew clean test build
 ```
 
-The project follows semantic versioning. This source revision is `0.2.0`.
+The project follows semantic versioning. This source revision is `0.3.0`.

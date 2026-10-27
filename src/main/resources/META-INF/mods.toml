@@ -43,3 +43,10 @@ mandatory=false
 versionRange="[0.17.0,)"
 ordering="AFTER"
 side="BOTH"
+
+[[dependencies.${mod_id}]]
+modId="icys_better_horses"
+mandatory=true
+versionRange="[2.1.6,2.2.0)"
+ordering="AFTER"
+side="BOTH"

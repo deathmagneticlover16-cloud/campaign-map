@@ -16,6 +16,6 @@
 
 `CampaignArmyData` owns strategic army position and movement. Every army has one real Recruits commander UUID. The commander is selected and validated before army creation, packed as the same persistent entity for strategic movement, and restored during deployment. `CommanderVisualSnapshot` contains only the commander entity type and visible appearance/equipment fields needed by clients.
 
-`MountedCommanderRenderer` creates render-only client proxies which are never added to the level. It routes the commander through the Recruits entity renderer and the mount through the horse renderer supplied by Icy's Better Horses. Interpolated campaign velocity drives model gait and facing; neither proxy can run AI or influence authoritative movement.
+`MountedCommanderRenderer` creates render-only client proxies which are never added to the level. It routes the commander through the Recruits entity renderer and uses the exact `icys-better-horses:mustang_horse` entity and Icy renderer for every mount. Simulated 20 Hz movement drives Icy's ordinary walk state, while army heading and the campaign camera basis preserve spatial 3D orientation. Neither proxy can run AI or influence authoritative movement.
 
 The current resources are bundled for a self-contained prototype. A future version can move definitions and province-image loading behind a datapack/resource reload layer without changing API consumers or ownership save data.

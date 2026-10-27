@@ -17,7 +17,6 @@ import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.animal.horse.Horse;
 import net.minecraft.world.phys.Vec3;
-import net.minecraftforge.fml.ModList;
 import net.minecraftforge.registries.ForgeRegistries;
 import org.joml.Quaternionf;
 
@@ -29,6 +28,7 @@ import java.util.UUID;
 
 /** Render-only horse and real Recruits commander proxies; neither proxy is added to the client level. */
 public final class MountedCommanderRenderer {
+    private static final ResourceLocation MUSTANG = new ResourceLocation("icys-better-horses", "mustang_horse");
     private static final double MODEL_MAP_SCALE = 8.0D;
     private final Map<UUID, Proxies> proxies = new HashMap<>();
 
@@ -51,7 +51,7 @@ public final class MountedCommanderRenderer {
             if (!projected.visible()) continue;
             float scale = (float) Math.max(5.0D, Math.min(24.0D,
                     camera.pixelsPerMapUnit(projected.depth()) * MODEL_MAP_SCALE));
-            renderPair(graphics, pair, projected.x(), projected.y(), scale, entry.bodyYaw(), partialTick);
+            renderPair(graphics, camera, pair, projected.x(), projected.y(), scale, entry.bodyYaw(), partialTick);
         }
         proxies.keySet().removeIf(id -> !live.contains(id));
     }
@@ -77,59 +77,61 @@ public final class MountedCommanderRenderer {
     private static LivingEntity createIcyHorse(UUID armyId) {
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.level == null) return null;
-        Set<String> icyNamespaces = new HashSet<>();
-        ModList.get().getMods().stream()
-                .filter(info -> {
-                    String name = info.getDisplayName().toLowerCase(java.util.Locale.ROOT);
-                    return name.contains("icy") && name.contains("horse");
-                })
-                .forEach(info -> icyNamespaces.add(info.getModId()));
-        for (EntityType<?> type : ForgeRegistries.ENTITY_TYPES.getValues()) {
-            ResourceLocation id = ForgeRegistries.ENTITY_TYPES.getKey(type);
-            if (id == null || !icyNamespaces.contains(id.getNamespace())
-                    || !id.getPath().contains("horse")) continue;
-            Entity entity = type.create(minecraft.level);
-            if (entity instanceof LivingEntity living) {
-                applyHorseAppearance(living, armyId);
-                return living;
-            }
+        EntityType<?> type = ForgeRegistries.ENTITY_TYPES.getValue(MUSTANG);
+        Entity entity = type == null ? null : type.create(minecraft.level);
+        if (!(entity instanceof LivingEntity mustang)) {
+            CampaignMapMod.LOGGER.error("Icy's Better Horses 2.1.6 did not register {}", MUSTANG);
+            return null;
         }
-        Horse horse = EntityType.HORSE.create(minecraft.level);
-        if (horse != null) {
-            horse.setTamed(true);
-            applyHorseAppearance(horse, armyId);
-        }
-        return horse;
+        applyHorseAppearance(mustang, armyId);
+        return mustang;
     }
 
     private static void applyHorseAppearance(LivingEntity horse, UUID armyId) {
         net.minecraft.nbt.CompoundTag appearance = new net.minecraft.nbt.CompoundTag();
-        appearance.putInt("Variant", Math.floorMod(armyId.hashCode(), 35));
+        appearance.putInt("BH_Coat", Math.floorMod(armyId.hashCode(), 8));
         appearance.putBoolean("Tame", true);
         net.minecraft.nbt.CompoundTag saddle = new net.minecraft.nbt.CompoundTag();
         new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.SADDLE).save(saddle);
         appearance.put("SaddleItem", saddle);
         horse.load(appearance);
+        if (horse instanceof Horse vanillaHorse) vanillaHorse.setTamed(true);
     }
 
     private static void animate(Proxies pair, ClientArmyCache.Entry entry, double seconds) {
-        float speed = switch (entry.snapshot().state()) {
-            case MOVING -> entry.snapshot().movementPath().isEmpty() ? 0.0F : 0.65F;
-            case RETREATING -> 0.0F;
-            default -> 0.0F;
-        };
-        if (entry.movementSpeed() > 0.05D) speed = Math.max(speed, 0.35F);
-        int ticks = (int) (seconds * 20.0D);
+        boolean advancing = entry.snapshot().state() == ArmyState.MOVING
+                && !entry.snapshot().movementPath().isEmpty() && entry.movementSpeed() > 0.01D;
+        float stride = advancing ? 0.82F : 0.0F;
+        int targetTick = (int) Math.floor(seconds * 20.0D);
+        if (pair.lastAnimationTick < 0) pair.lastAnimationTick = targetTick - 1;
+        int simulatedTicks = Math.min(5, Math.max(0, targetTick - pair.lastAnimationTick));
+        for (int tick = 0; tick < simulatedTicks; tick++) {
+            pair.horse.walkAnimation.update(stride, 0.45F);
+        }
+        pair.lastAnimationTick = targetTick;
+
+        Vec3 current = entry.displayedPosition();
+        Vec3 delta = pair.lastPosition == null ? Vec3.ZERO : current.subtract(pair.lastPosition);
+        Vec3 motion = delta.horizontalDistanceSqr() < 1.0e-8D ? Vec3.ZERO
+                : new Vec3(delta.x, 0.0D, delta.z).normalize().scale(advancing ? 0.18D : 0.0D);
+        pair.lastPosition = current;
+        pair.horse.setPos(current);
+        pair.horse.setDeltaMovement(motion);
+        pair.horse.setOnGround(true);
+        pair.horse.tickCount = targetTick;
+        pair.commander.tickCount = targetTick;
         for (LivingEntity entity : new LivingEntity[]{pair.horse, pair.commander}) {
-            entity.tickCount = ticks;
             entity.setYRot(entry.bodyYaw());
             entity.setYBodyRot(entry.bodyYaw());
             entity.setYHeadRot(entry.bodyYaw());
-            entity.walkAnimation.update(speed, 0.35F);
         }
+        pair.horse.positionRider(pair.commander);
+        pair.commander.setDeltaMovement(motion);
+        pair.commander.setOnGround(true);
     }
 
-    private static void renderPair(GuiGraphics graphics, Proxies pair, double x, double y, float scale,
+    private static void renderPair(GuiGraphics graphics, CampaignCamera3D camera, Proxies pair,
+                                   double x, double y, float scale,
                                    float yaw, float partialTick) {
         Minecraft minecraft = Minecraft.getInstance();
         EntityRenderDispatcher dispatcher = minecraft.getEntityRenderDispatcher();
@@ -139,17 +141,19 @@ public final class MountedCommanderRenderer {
         pose.translate(x, y + scale * 1.35F, 250.0D);
         pose.scale(scale, scale, -scale);
         pose.mulPose(Axis.ZP.rotationDegrees(180.0F));
-        pose.mulPose(Axis.YP.rotationDegrees(180.0F - yaw));
-        dispatcher.overrideCameraOrientation(Axis.XP.rotationDegrees(12.0F));
+        pose.mulPose(Axis.XP.rotationDegrees(90.0F - camera.pitchDegrees()));
+        pose.mulPose(Axis.YP.rotationDegrees(180.0F - (yaw - camera.yawDegrees())));
+        dispatcher.overrideCameraOrientation(new Quaternionf()
+                .rotationYXZ((float) Math.toRadians(-camera.yawDegrees()),
+                        (float) Math.toRadians(camera.pitchDegrees()), 0.0F));
         dispatcher.setRenderShadow(false);
         var buffers = minecraft.renderBuffers().bufferSource();
         dispatcher.render(pair.horse, 0.0D, 0.0D, 0.0D, 0.0F, partialTick, pose, buffers,
                 LightTexture.FULL_BRIGHT);
-        pose.pushPose();
-        pose.translate(0.0D, pair.horse.getPassengersRidingOffset(), 0.0D);
-        dispatcher.render(pair.commander, 0.0D, 0.0D, 0.0D, 0.0F, partialTick, pose, buffers,
+        Vec3 riderOffset = pair.commander.position().subtract(pair.horse.position());
+        dispatcher.render(pair.commander, riderOffset.x, riderOffset.y, riderOffset.z,
+                0.0F, partialTick, pose, buffers,
                 LightTexture.FULL_BRIGHT);
-        pose.popPose();
         buffers.endBatch();
         dispatcher.setRenderShadow(true);
         dispatcher.overrideCameraOrientation(oldOrientation);
@@ -164,5 +168,17 @@ public final class MountedCommanderRenderer {
                 sample.v() * registry.pixelMap().height());
     }
 
-    private record Proxies(CommanderVisualSnapshot visual, LivingEntity horse, LivingEntity commander) {}
+    private static final class Proxies {
+        private final CommanderVisualSnapshot visual;
+        private final LivingEntity horse;
+        private final LivingEntity commander;
+        private int lastAnimationTick = -1;
+        private Vec3 lastPosition;
+
+        private Proxies(CommanderVisualSnapshot visual, LivingEntity horse, LivingEntity commander) {
+            this.visual = visual;
+            this.horse = horse;
+            this.commander = commander;
+        }
+    }
 }

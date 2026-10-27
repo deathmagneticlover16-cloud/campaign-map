@@ -119,6 +119,8 @@ public final class CampaignCamera3D {
 
     public Vec3 right() { return right; }
     public Vec3 forward() { return forward; }
+    public float yawDegrees() { return (float) Math.toDegrees(yaw); }
+    public float pitchDegrees() { return (float) Math.toDegrees(pitch); }
     public double pixelsPerMapUnit(double depth) { return depth <= 0.5 ? 0.0 : focalLength() / depth; }
 
     private void rebuildBasis() {
