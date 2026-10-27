@@ -6,7 +6,6 @@ import com.lastpagans.campaignmap.api.army.CommanderVisualSnapshot;
 import com.lastpagans.campaignmap.client.CampaignCamera3D;
 import com.lastpagans.campaignmap.geography.ProvinceRegistry;
 import com.mojang.blaze3d.vertex.PoseStack;
-import com.mojang.math.Axis;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.renderer.LightTexture;
@@ -18,7 +17,7 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.animal.horse.Horse;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.registries.ForgeRegistries;
-import org.joml.Quaternionf;
+import org.joml.Matrix4f;
 
 import java.util.HashMap;
 import java.util.HashSet;
@@ -47,7 +46,7 @@ public final class MountedCommanderRenderer {
             }
             animate(pair, entry);
             Vec3 map = mapPosition(entry.displayedPosition());
-            var projected = camera.project(map.x, 0.05D, map.z);
+            var projected = camera.project(map.x, 0.0D, map.z);
             if (!projected.visible()) continue;
             float scale = (float) Math.max(5.0D, Math.min(24.0D,
                     camera.pixelsPerMapUnit(projected.depth()) * MODEL_MAP_SCALE));
@@ -64,6 +63,7 @@ public final class MountedCommanderRenderer {
             Entity rawCommander = commanderType == null ? null : commanderType.create(minecraft.level);
             if (!(rawCommander instanceof LivingEntity commander)) return null;
             commander.load(visual.appearance());
+            commander.setCustomNameVisible(false);
             LivingEntity horse = createIcyHorse(armyId);
             if (horse == null) return null;
             int renderId = 1 + Math.floorMod(armyId.hashCode(), 1_000_000_000);
@@ -124,14 +124,27 @@ public final class MountedCommanderRenderer {
         pair.horse.setOnGround(true);
         pair.horse.tickCount = (int) targetTick;
         pair.commander.tickCount = (int) targetTick;
-        for (LivingEntity entity : new LivingEntity[]{pair.horse, pair.commander}) {
-            entity.setYRot(entry.bodyYaw());
-            entity.setYBodyRot(entry.bodyYaw());
-            entity.setYHeadRot(entry.bodyYaw());
-        }
+        applySharedYaw(pair.horse, pair.commander, entry.bodyYaw());
         pair.horse.positionRider(pair.commander);
         pair.commander.setDeltaMovement(motion);
         pair.commander.setOnGround(true);
+    }
+
+    /** The Mustang owns travel rotation; the rider mirrors it without interpolation competition. */
+    private static void applySharedYaw(LivingEntity horse, LivingEntity rider, float yaw) {
+        horse.setYRot(yaw);
+        horse.yRotO = yaw;
+        horse.setYBodyRot(yaw);
+        horse.yBodyRotO = yaw;
+        horse.setYHeadRot(yaw);
+        horse.yHeadRotO = yaw;
+
+        rider.setYRot(yaw);
+        rider.yRotO = yaw;
+        rider.setYBodyRot(yaw);
+        rider.yBodyRotO = yaw;
+        rider.setYHeadRot(yaw);
+        rider.yHeadRotO = yaw;
     }
 
     private static void renderPair(GuiGraphics graphics, CampaignCamera3D camera, Proxies pair,
@@ -140,25 +153,31 @@ public final class MountedCommanderRenderer {
         Minecraft minecraft = Minecraft.getInstance();
         EntityRenderDispatcher dispatcher = minecraft.getEntityRenderDispatcher();
         PoseStack pose = graphics.pose();
-        Quaternionf oldOrientation = new Quaternionf(dispatcher.cameraOrientation());
         pose.pushPose();
-        pose.translate(x, y, 250.0D);
-        pose.scale(scale, scale, -scale);
-        pose.mulPose(Axis.ZP.rotationDegrees(180.0F));
-        pose.mulPose(Axis.YP.rotationDegrees(180.0F - (yaw - camera.yawDegrees())));
-        dispatcher.overrideCameraOrientation(Axis.YP.rotationDegrees(-camera.yawDegrees()));
+        pose.mulPoseMatrix(spatialTransform(camera, x, y, scale));
         dispatcher.setRenderShadow(false);
         var buffers = minecraft.renderBuffers().bufferSource();
-        dispatcher.render(pair.horse, 0.0D, 0.0D, 0.0D, 0.0F, partialTick, pose, buffers,
+        dispatcher.render(pair.horse, 0.0D, 0.0D, 0.0D, yaw, partialTick, pose, buffers,
                 LightTexture.FULL_BRIGHT);
         Vec3 riderOffset = pair.commander.position().subtract(pair.horse.position());
         dispatcher.render(pair.commander, riderOffset.x, riderOffset.y, riderOffset.z,
-                0.0F, partialTick, pose, buffers,
+                yaw, partialTick, pose, buffers,
                 LightTexture.FULL_BRIGHT);
         buffers.endBatch();
         dispatcher.setRenderShadow(true);
-        dispatcher.overrideCameraOrientation(oldOrientation);
         pose.popPose();
+    }
+
+    private static Matrix4f spatialTransform(CampaignCamera3D camera, double x, double y, float scale) {
+        Vec3 right = camera.right();
+        Vec3 up = camera.up();
+        Vec3 forward = camera.forward();
+        float depthScale = scale * 0.08F;
+        return new Matrix4f(
+                (float) right.x * scale, (float) -up.x * scale, (float) forward.x * depthScale, 0.0F,
+                (float) right.y * scale, (float) -up.y * scale, (float) forward.y * depthScale, 0.0F,
+                (float) right.z * scale, (float) -up.z * scale, (float) forward.z * depthScale, 0.0F,
+                (float) x, (float) y, 250.0F, 1.0F);
     }
 
     private static Vec3 mapPosition(Vec3 worldPosition) {
