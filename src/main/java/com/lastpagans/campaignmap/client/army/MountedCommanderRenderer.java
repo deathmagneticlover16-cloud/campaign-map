@@ -32,7 +32,7 @@ public final class MountedCommanderRenderer {
     private static final double MODEL_MAP_SCALE = 8.0D;
     private final Map<UUID, Proxies> proxies = new HashMap<>();
 
-    public void render(GuiGraphics graphics, CampaignCamera3D camera, double animationSeconds, float partialTick) {
+    public void render(GuiGraphics graphics, CampaignCamera3D camera, float partialTick) {
         Set<UUID> live = new HashSet<>();
         for (ClientArmyCache.Entry entry : ClientArmyCache.entries()) {
             var army = entry.snapshot();
@@ -45,9 +45,9 @@ public final class MountedCommanderRenderer {
                 if (pair == null) continue;
                 proxies.put(army.armyId(), pair);
             }
-            animate(pair, entry, animationSeconds);
+            animate(pair, entry);
             Vec3 map = mapPosition(entry.displayedPosition());
-            var projected = camera.project(map.x, 0.45D, map.z);
+            var projected = camera.project(map.x, 0.05D, map.z);
             if (!projected.visible()) continue;
             float scale = (float) Math.max(5.0D, Math.min(24.0D,
                     camera.pixelsPerMapUnit(projected.depth()) * MODEL_MAP_SCALE));
@@ -66,6 +66,9 @@ public final class MountedCommanderRenderer {
             commander.load(visual.appearance());
             LivingEntity horse = createIcyHorse(armyId);
             if (horse == null) return null;
+            int renderId = 1 + Math.floorMod(armyId.hashCode(), 1_000_000_000);
+            horse.setId(-renderId);
+            commander.setId(-renderId - 1);
             commander.startRiding(horse, true);
             return new Proxies(visual, horse, commander);
         } catch (LinkageError | RuntimeException error) {
@@ -98,13 +101,14 @@ public final class MountedCommanderRenderer {
         if (horse instanceof Horse vanillaHorse) vanillaHorse.setTamed(true);
     }
 
-    private static void animate(Proxies pair, ClientArmyCache.Entry entry, double seconds) {
+    private static void animate(Proxies pair, ClientArmyCache.Entry entry) {
         boolean advancing = entry.snapshot().state() == ArmyState.MOVING
                 && !entry.snapshot().movementPath().isEmpty() && entry.movementSpeed() > 0.01D;
         float stride = advancing ? 0.82F : 0.0F;
-        int targetTick = (int) Math.floor(seconds * 20.0D);
+        Minecraft minecraft = Minecraft.getInstance();
+        long targetTick = minecraft.level == null ? 0L : minecraft.level.getGameTime();
         if (pair.lastAnimationTick < 0) pair.lastAnimationTick = targetTick - 1;
-        int simulatedTicks = Math.min(5, Math.max(0, targetTick - pair.lastAnimationTick));
+        int simulatedTicks = (int) Math.min(5L, Math.max(0L, targetTick - pair.lastAnimationTick));
         for (int tick = 0; tick < simulatedTicks; tick++) {
             pair.horse.walkAnimation.update(stride, 0.45F);
         }
@@ -118,8 +122,8 @@ public final class MountedCommanderRenderer {
         pair.horse.setPos(current);
         pair.horse.setDeltaMovement(motion);
         pair.horse.setOnGround(true);
-        pair.horse.tickCount = targetTick;
-        pair.commander.tickCount = targetTick;
+        pair.horse.tickCount = (int) targetTick;
+        pair.commander.tickCount = (int) targetTick;
         for (LivingEntity entity : new LivingEntity[]{pair.horse, pair.commander}) {
             entity.setYRot(entry.bodyYaw());
             entity.setYBodyRot(entry.bodyYaw());
@@ -138,14 +142,11 @@ public final class MountedCommanderRenderer {
         PoseStack pose = graphics.pose();
         Quaternionf oldOrientation = new Quaternionf(dispatcher.cameraOrientation());
         pose.pushPose();
-        pose.translate(x, y + scale * 1.35F, 250.0D);
+        pose.translate(x, y, 250.0D);
         pose.scale(scale, scale, -scale);
         pose.mulPose(Axis.ZP.rotationDegrees(180.0F));
-        pose.mulPose(Axis.XP.rotationDegrees(90.0F - camera.pitchDegrees()));
         pose.mulPose(Axis.YP.rotationDegrees(180.0F - (yaw - camera.yawDegrees())));
-        dispatcher.overrideCameraOrientation(new Quaternionf()
-                .rotationYXZ((float) Math.toRadians(-camera.yawDegrees()),
-                        (float) Math.toRadians(camera.pitchDegrees()), 0.0F));
+        dispatcher.overrideCameraOrientation(Axis.YP.rotationDegrees(-camera.yawDegrees()));
         dispatcher.setRenderShadow(false);
         var buffers = minecraft.renderBuffers().bufferSource();
         dispatcher.render(pair.horse, 0.0D, 0.0D, 0.0D, 0.0F, partialTick, pose, buffers,
@@ -172,7 +173,7 @@ public final class MountedCommanderRenderer {
         private final CommanderVisualSnapshot visual;
         private final LivingEntity horse;
         private final LivingEntity commander;
-        private int lastAnimationTick = -1;
+        private long lastAnimationTick = -1L;
         private Vec3 lastPosition;
 
         private Proxies(CommanderVisualSnapshot visual, LivingEntity horse, LivingEntity commander) {

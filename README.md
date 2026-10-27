@@ -76,4 +76,4 @@ Use Java 17 or a Gradle toolchain capable of obtaining Java 17:
 ./gradlew clean test build
 ```
 
-The project follows semantic versioning. This source revision is `0.3.0`.
+The project follows semantic versioning. This source revision is `0.3.1`.

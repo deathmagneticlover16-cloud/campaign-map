@@ -124,7 +124,7 @@ public final class CampaignMapScreen extends Screen {
         renderMapTextures(graphics);
         renderLabels(graphics);
         java.util.UUID localPlayer = minecraft.player == null ? null : minecraft.player.getUUID();
-        mountedCommanderRenderer.render(graphics, camera, animationSeconds, partialTick);
+        mountedCommanderRenderer.render(graphics, camera, partialTick);
         bannerRenderer.render(graphics, camera, selectedArmy, localPlayer, animationSeconds);
         graphics.disableScissor();
         renderPanel(graphics);
