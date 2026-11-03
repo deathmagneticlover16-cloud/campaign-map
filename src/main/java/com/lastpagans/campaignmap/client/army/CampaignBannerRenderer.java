@@ -27,7 +27,7 @@ public final class CampaignBannerRenderer {
             "textures/misc/default_army_banner.png");
     private static final int STRIPS = 8;
     private static final double FLAG_WIDTH = 25.0;
-    private static final double BANNER_HEIGHT = 13.0;
+    private static final double BANNER_HEIGHT = 26.0;
 
     public void render(GuiGraphics graphics, CampaignCamera3D camera, @Nullable UUID selectedArmy,
                        @Nullable UUID localPlayer, double animationSeconds) {

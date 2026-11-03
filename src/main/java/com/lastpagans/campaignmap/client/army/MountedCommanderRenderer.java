@@ -5,6 +5,7 @@ import com.lastpagans.campaignmap.api.army.ArmyState;
 import com.lastpagans.campaignmap.api.army.CommanderVisualSnapshot;
 import com.lastpagans.campaignmap.client.CampaignCamera3D;
 import com.lastpagans.campaignmap.geography.ProvinceRegistry;
+import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -28,7 +29,8 @@ import java.util.UUID;
 /** Render-only horse and real Recruits commander proxies; neither proxy is added to the client level. */
 public final class MountedCommanderRenderer {
     private static final ResourceLocation MUSTANG = new ResourceLocation("icys-better-horses", "mustang_horse");
-    private static final double MODEL_MAP_SCALE = 8.0D;
+    /** Number of campaign-map units occupied by one entity-space block. */
+    private static final double MAP_UNITS_PER_BLOCK = 8.0D;
     private final Map<UUID, Proxies> proxies = new HashMap<>();
 
     public void render(GuiGraphics graphics, CampaignCamera3D camera, float partialTick) {
@@ -48,9 +50,7 @@ public final class MountedCommanderRenderer {
             Vec3 map = mapPosition(entry.displayedPosition());
             var projected = camera.project(map.x, 0.0D, map.z);
             if (!projected.visible()) continue;
-            float scale = (float) Math.max(5.0D, Math.min(24.0D,
-                    camera.pixelsPerMapUnit(projected.depth()) * MODEL_MAP_SCALE));
-            renderPair(graphics, camera, pair, projected.x(), projected.y(), scale, entry.bodyYaw(), partialTick);
+            renderPair(graphics, camera, pair, map, entry.bodyYaw(), partialTick);
         }
         proxies.keySet().removeIf(id -> !live.contains(id));
     }
@@ -122,12 +122,16 @@ public final class MountedCommanderRenderer {
         pair.horse.setPos(current);
         pair.horse.setDeltaMovement(motion);
         pair.horse.setOnGround(true);
+        pair.horse.setXRot(0.0F);
+        pair.horse.xRotO = 0.0F;
         pair.horse.tickCount = (int) targetTick;
         pair.commander.tickCount = (int) targetTick;
         applySharedYaw(pair.horse, pair.commander, entry.bodyYaw());
         pair.horse.positionRider(pair.commander);
         pair.commander.setDeltaMovement(motion);
         pair.commander.setOnGround(true);
+        pair.commander.setXRot(0.0F);
+        pair.commander.xRotO = 0.0F;
     }
 
     /** The Mustang owns travel rotation; the rider mirrors it without interpolation competition. */
@@ -148,13 +152,15 @@ public final class MountedCommanderRenderer {
     }
 
     private static void renderPair(GuiGraphics graphics, CampaignCamera3D camera, Proxies pair,
-                                   double x, double y, float scale,
+                                   Vec3 mapAnchor,
                                    float yaw, float partialTick) {
         Minecraft minecraft = Minecraft.getInstance();
         EntityRenderDispatcher dispatcher = minecraft.getEntityRenderDispatcher();
         PoseStack pose = graphics.pose();
         pose.pushPose();
-        pose.mulPoseMatrix(spatialTransform(camera, x, y, scale));
+        pose.mulPoseMatrix(mapSpaceTransform(camera, mapAnchor));
+        RenderSystem.enableDepthTest();
+        RenderSystem.depthMask(true);
         dispatcher.setRenderShadow(false);
         var buffers = minecraft.renderBuffers().bufferSource();
         dispatcher.render(pair.horse, 0.0D, 0.0D, 0.0D, yaw, partialTick, pose, buffers,
@@ -168,16 +174,30 @@ public final class MountedCommanderRenderer {
         pose.popPose();
     }
 
-    private static Matrix4f spatialTransform(CampaignCamera3D camera, double x, double y, float scale) {
-        Vec3 right = camera.right();
-        Vec3 up = camera.up();
-        Vec3 forward = camera.forward();
-        float depthScale = scale * 0.08F;
+    /**
+     * Maps entity-local X/up/Z into fixed campaign-map X/elevation/Z axes.  Building
+     * the basis from projected map points keeps the model planted on the map while
+     * the campaign camera orbits; no camera-facing billboard rotation is involved.
+     */
+    private static Matrix4f mapSpaceTransform(CampaignCamera3D camera, Vec3 anchor) {
+        var origin = camera.project(anchor.x, 0.0D, anchor.z);
+        var mapX = camera.project(anchor.x + MAP_UNITS_PER_BLOCK, 0.0D, anchor.z);
+        var mapUp = camera.project(anchor.x, MAP_UNITS_PER_BLOCK, anchor.z);
+        var mapZ = camera.project(anchor.x, 0.0D, anchor.z + MAP_UNITS_PER_BLOCK);
+
+        float originDepth = renderDepth(origin);
+        float xDepth = renderDepth(mapX) - originDepth;
+        float upDepth = renderDepth(mapUp) - originDepth;
+        float zDepth = renderDepth(mapZ) - originDepth;
         return new Matrix4f(
-                (float) right.x * scale, (float) -up.x * scale, (float) forward.x * depthScale, 0.0F,
-                (float) right.y * scale, (float) -up.y * scale, (float) forward.y * depthScale, 0.0F,
-                (float) right.z * scale, (float) -up.z * scale, (float) forward.z * depthScale, 0.0F,
-                (float) x, (float) y, 250.0F, 1.0F);
+                (float) (mapX.x() - origin.x()), (float) (mapX.y() - origin.y()), xDepth, 0.0F,
+                (float) (mapUp.x() - origin.x()), (float) (mapUp.y() - origin.y()), upDepth, 0.0F,
+                (float) (mapZ.x() - origin.x()), (float) (mapZ.y() - origin.y()), zDepth, 0.0F,
+                (float) origin.x(), (float) origin.y(), originDepth, 1.0F);
+    }
+
+    private static float renderDepth(CampaignCamera3D.ProjectedPoint point) {
+        return (float) Math.max(-500.0D, Math.min(500.0D, 300.0D - point.depth() * 0.01D));
     }
 
     private static Vec3 mapPosition(Vec3 worldPosition) {
