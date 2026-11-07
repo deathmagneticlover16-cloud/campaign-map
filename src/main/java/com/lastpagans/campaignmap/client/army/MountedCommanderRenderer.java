@@ -12,11 +12,17 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.renderer.LightTexture;
 import net.minecraft.client.renderer.entity.EntityRenderDispatcher;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.Tag;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.animal.horse.Horse;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.scores.PlayerTeam;
+import net.minecraft.world.scores.Scoreboard;
 import net.minecraftforge.registries.ForgeRegistries;
 import org.joml.Matrix4f;
 
@@ -31,6 +37,12 @@ public final class MountedCommanderRenderer {
     private static final ResourceLocation MUSTANG = new ResourceLocation("icys-better-horses", "mustang_horse");
     /** Number of campaign-map units occupied by one entity-space block. */
     private static final double MAP_UNITS_PER_BLOCK = 8.0D;
+    /** Below Icy's ridden-trot threshold, selecting its walk gait. */
+    private static final float ICY_WALK_SPEED = 0.24F;
+    private static final EquipmentSlot[] RECRUITS_INVENTORY_SLOTS = {
+            EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS,
+            EquipmentSlot.FEET, EquipmentSlot.OFFHAND, EquipmentSlot.MAINHAND
+    };
     private final Map<UUID, Proxies> proxies = new HashMap<>();
 
     public void render(GuiGraphics graphics, CampaignCamera3D camera, float partialTick) {
@@ -42,9 +54,11 @@ public final class MountedCommanderRenderer {
             live.add(army.armyId());
             Proxies pair = proxies.get(army.armyId());
             if (pair == null || !pair.visual.equals(army.commanderVisual())) {
-                pair = create(army.armyId(), army.commanderVisual());
-                if (pair == null) continue;
-                proxies.put(army.armyId(), pair);
+                Proxies replacement = create(army.armyId(), army.commanderVisual());
+                if (replacement == null) continue;
+                Proxies previous = proxies.put(army.armyId(), replacement);
+                if (previous != null) previous.dispose();
+                pair = replacement;
             }
             animate(pair, entry);
             Vec3 map = mapPosition(entry.displayedPosition());
@@ -52,7 +66,11 @@ public final class MountedCommanderRenderer {
             if (!projected.visible()) continue;
             renderPair(graphics, camera, pair, map, entry.bodyYaw(), partialTick);
         }
-        proxies.keySet().removeIf(id -> !live.contains(id));
+        proxies.entrySet().removeIf(entry -> {
+            if (live.contains(entry.getKey())) return false;
+            entry.getValue().dispose();
+            return true;
+        });
     }
 
     private static Proxies create(UUID armyId, CommanderVisualSnapshot visual) {
@@ -62,19 +80,44 @@ public final class MountedCommanderRenderer {
             EntityType<?> commanderType = ForgeRegistries.ENTITY_TYPES.getValue(visual.entityType());
             Entity rawCommander = commanderType == null ? null : commanderType.create(minecraft.level);
             if (!(rawCommander instanceof LivingEntity commander)) return null;
-            commander.load(visual.appearance());
+            CompoundTag appearance = visual.appearance();
+            commander.load(appearance);
+            restoreRecruitsEquipment(commander, appearance);
             commander.setCustomNameVisible(false);
             LivingEntity horse = createIcyHorse(armyId);
             if (horse == null) return null;
             int renderId = 1 + Math.floorMod(armyId.hashCode(), 1_000_000_000);
             horse.setId(-renderId);
             commander.setId(-renderId - 1);
+            PlayerTeam renderTeam = attachRenderTeam(minecraft, armyId, commander);
             commander.startRiding(horse, true);
-            return new Proxies(visual, horse, commander);
+            return new Proxies(visual, horse, commander, renderTeam);
         } catch (LinkageError | RuntimeException error) {
             CampaignMapMod.LOGGER.warn("Could not create mounted campaign commander proxy", error);
             return null;
         }
+    }
+
+    /** Recruits stores its six equipped slots in its own Items inventory as well as Mob equipment. */
+    private static void restoreRecruitsEquipment(LivingEntity commander, CompoundTag appearance) {
+        for (Tag raw : appearance.getList("Items", Tag.TAG_COMPOUND)) {
+            if (!(raw instanceof CompoundTag itemTag)) continue;
+            int slot = itemTag.getByte("Slot") & 255;
+            if (slot >= RECRUITS_INVENTORY_SLOTS.length) continue;
+            ItemStack stack = ItemStack.of(itemTag);
+            if (!stack.isEmpty()) commander.setItemSlot(RECRUITS_INVENTORY_SLOTS[slot], stack);
+        }
+    }
+
+    /** Makes Recruits' clothing layer use the synchronized Color value, as it does for a live grouped recruit. */
+    private static PlayerTeam attachRenderTeam(Minecraft minecraft, UUID armyId, LivingEntity commander) {
+        if (minecraft.level == null) return null;
+        Scoreboard scoreboard = minecraft.level.getScoreboard();
+        String name = "cm" + armyId.toString().replace("-", "").substring(0, 14);
+        PlayerTeam team = scoreboard.getPlayerTeam(name);
+        if (team == null) team = scoreboard.addPlayerTeam(name);
+        scoreboard.addPlayerToTeam(commander.getScoreboardName(), team);
+        return team;
     }
 
     private static LivingEntity createIcyHorse(UUID armyId) {
@@ -104,7 +147,7 @@ public final class MountedCommanderRenderer {
     private static void animate(Proxies pair, ClientArmyCache.Entry entry) {
         boolean advancing = entry.snapshot().state() == ArmyState.MOVING
                 && !entry.snapshot().movementPath().isEmpty() && entry.movementSpeed() > 0.01D;
-        float stride = advancing ? 0.82F : 0.0F;
+        float stride = advancing ? ICY_WALK_SPEED : 0.0F;
         Minecraft minecraft = Minecraft.getInstance();
         long targetTick = minecraft.level == null ? 0L : minecraft.level.getGameTime();
         if (pair.lastAnimationTick < 0) pair.lastAnimationTick = targetTick - 1;
@@ -186,9 +229,9 @@ public final class MountedCommanderRenderer {
         var mapZ = camera.project(anchor.x, 0.0D, anchor.z + MAP_UNITS_PER_BLOCK);
 
         float originDepth = renderDepth(origin);
-        float xDepth = renderDepth(mapX) - originDepth;
-        float upDepth = renderDepth(mapUp) - originDepth;
-        float zDepth = renderDepth(mapZ) - originDepth;
+        float xDepth = modelDepthDelta(origin, mapX);
+        float upDepth = modelDepthDelta(origin, mapUp);
+        float zDepth = modelDepthDelta(origin, mapZ);
         return new Matrix4f(
                 (float) (mapX.x() - origin.x()), (float) (mapX.y() - origin.y()), xDepth, 0.0F,
                 (float) (mapUp.x() - origin.x()), (float) (mapUp.y() - origin.y()), upDepth, 0.0F,
@@ -198,6 +241,17 @@ public final class MountedCommanderRenderer {
 
     private static float renderDepth(CampaignCamera3D.ProjectedPoint point) {
         return (float) Math.max(-500.0D, Math.min(500.0D, 300.0D - point.depth() * 0.01D));
+    }
+
+    /** Preserve depth between skin, clothing, hats, and armor instead of flattening their surfaces together. */
+    private static float modelDepthDelta(CampaignCamera3D.ProjectedPoint origin,
+                                         CampaignCamera3D.ProjectedPoint point) {
+        return (float) (origin.depth() - point.depth());
+    }
+
+    public void close() {
+        proxies.values().forEach(Proxies::dispose);
+        proxies.clear();
     }
 
     private static Vec3 mapPosition(Vec3 worldPosition) {
@@ -212,13 +266,24 @@ public final class MountedCommanderRenderer {
         private final CommanderVisualSnapshot visual;
         private final LivingEntity horse;
         private final LivingEntity commander;
+        private final PlayerTeam renderTeam;
         private long lastAnimationTick = -1L;
         private Vec3 lastPosition;
 
-        private Proxies(CommanderVisualSnapshot visual, LivingEntity horse, LivingEntity commander) {
+        private Proxies(CommanderVisualSnapshot visual, LivingEntity horse, LivingEntity commander,
+                        PlayerTeam renderTeam) {
             this.visual = visual;
             this.horse = horse;
             this.commander = commander;
+            this.renderTeam = renderTeam;
+        }
+
+        private void dispose() {
+            Minecraft minecraft = Minecraft.getInstance();
+            if (renderTeam == null || minecraft.level == null) return;
+            Scoreboard scoreboard = minecraft.level.getScoreboard();
+            scoreboard.removePlayerFromTeam(commander.getScoreboardName(), renderTeam);
+            if (renderTeam.getPlayers().isEmpty()) scoreboard.removePlayerTeam(renderTeam);
         }
     }
 }

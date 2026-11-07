@@ -672,6 +672,7 @@ public final class CampaignMapScreen extends Screen {
 
     @Override
     public void removed() {
+        mountedCommanderRenderer.close();
         if (overlayLocation != null) Minecraft.getInstance().getTextureManager().release(overlayLocation);
         overlayLocation = null;
         overlayTexture = null;
