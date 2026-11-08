@@ -11,6 +11,7 @@ import com.lastpagans.campaignmap.client.army.ClientGroupCatalog;
 import com.lastpagans.campaignmap.data.CampaignOwnershipData;
 import com.lastpagans.campaignmap.geography.ProvinceRegistry;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.fml.DistExecutor;
@@ -25,7 +26,7 @@ import java.util.List;
 import java.util.function.Supplier;
 
 public final class CampaignNetwork {
-    private static final String PROTOCOL = "6";
+    private static final String PROTOCOL = "7";
     private static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(CampaignMapMod.MOD_ID, "main"), () -> PROTOCOL, PROTOCOL::equals, PROTOCOL::equals);
 
@@ -125,11 +126,14 @@ public final class CampaignNetwork {
             List<java.util.UUID> validGroups = packet.groupIds().stream().distinct()
                     .filter(group -> CampaignGroupProviders.hasProviderFor(player.serverLevel(), group))
                     .filter(group -> CampaignGroupProviders.canManage(player.serverLevel(), player.getUUID(), group))
+                    .filter(group -> CampaignGroupProviders.soldierCount(player.serverLevel(), group) > 0)
                     .filter(group -> !data.isGroupAssigned(group))
                     .toList();
             if (!validGroups.isEmpty()) {
-                double x = player.getX();
-                double z = player.getZ();
+                Vec3 commanderPosition = CampaignGroupProviders.commanderPosition(
+                        player.serverLevel(), packet.commanderId()).orElse(player.position());
+                double x = commanderPosition.x;
+                double z = commanderPosition.z;
                 if (!ProvinceRegistry.get().projection().isWorldInsideMap(x, z)) {
                     var center = ProvinceRegistry.get().projection().pixelToWorld(
                             ProvinceRegistry.get().pixelMap().width() * 0.5,
@@ -142,7 +146,6 @@ public final class CampaignNetwork {
                 for (java.util.UUID group : validGroups) {
                     data.addGroup(player.serverLevel(), army.armyId(), player.getUUID(), group, false);
                 }
-                data.deployNow(player.serverLevel(), army.armyId());
                 data.snapshot(player.serverLevel(), army.armyId()).ifPresent(CampaignNetwork::sendArmyUpdate);
             }
         }
@@ -224,7 +227,8 @@ public final class CampaignNetwork {
         CampaignOwnershipData data = CampaignOwnershipData.get(player.serverLevel());
         CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new OwnershipSyncPacket(true, List.copyOf(data.states())));
         CampaignArmyData armyData = CampaignArmyData.get(player.serverLevel());
-        CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), ArmySyncPacket.full(armyData.snapshots(player.serverLevel())));
+        CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), ArmySyncPacket.full(armyData.snapshots(player.serverLevel())
+                .stream().map(army -> forObserver(army, player)).toList()));
         CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new GroupCatalogSyncPacket(
                 CampaignGroupProviders.ownedGroups(player.serverLevel(), player.getUUID()),
                 CampaignGroupProviders.ownedCommanders(player.serverLevel(), player.getUUID())));
@@ -235,7 +239,39 @@ public final class CampaignNetwork {
     }
 
     public static void sendArmyUpdate(CampaignArmySnapshot army) {
-        CHANNEL.send(PacketDistributor.ALL.noArg(), ArmySyncPacket.update(army));
+        var server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
+        if (server == null) return;
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
+                    ArmySyncPacket.update(forObserver(army, player)));
+        }
+    }
+
+    /** Refreshes visibility as players approach or leave enemy armies, including stationary armies. */
+    public static void sendArmyIntelligence(ServerLevel level) {
+        List<CampaignArmySnapshot> armies = CampaignArmyData.get(level).snapshots(level);
+        for (ServerPlayer player : level.getServer().getPlayerList().getPlayers()) {
+            CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), ArmySyncPacket.full(
+                    armies.stream().map(army -> forObserver(army, player)).toList()));
+        }
+    }
+
+    public static CampaignArmySnapshot forObserver(CampaignArmySnapshot army, ServerPlayer observer) {
+        if (army.ownerId().equals(observer.getUUID())) return army;
+        double dx = observer.getX() - army.campaignPosition().x;
+        double dz = observer.getZ() - army.campaignPosition().z;
+        double distance = Math.sqrt(dx * dx + dz * dz);
+        final double exactRange = 32.0D;
+        final double identificationRange = 256.0D;
+        boolean exact = distance <= exactRange;
+        double fraction = exact ? 1.0D : Math.max(0.0D,
+                1.0D - (distance - exactRange) / (identificationRange - exactRange));
+        int observed = exact ? army.totalSoldiers() : (int) Math.floor(army.totalSoldiers() * fraction);
+        return new CampaignArmySnapshot(army.armyId(), army.ownerId(), army.armyName(),
+                army.commanderId(), army.commanderVisual(), army.commanderAvailable(),
+                exact ? army.groupIds() : List.of(), army.flagTexture(), army.flagAspectRatio(),
+                army.campaignPosition(), army.movementPath(), army.state(), army.foodSupplies(), army.fatigue(),
+                observed, exact, army.transitionTicksRemaining(), army.transitionTicksTotal());
     }
 
     public static void sendArmyRemoval(java.util.UUID armyId) {

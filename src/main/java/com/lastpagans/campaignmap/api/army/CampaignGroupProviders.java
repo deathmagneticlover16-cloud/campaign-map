@@ -82,6 +82,11 @@ public final class CampaignGroupProviders {
                 .map(provider -> provider.commanderVisual(level, commanderId)).flatMap(Optional::stream).findFirst();
     }
 
+    public static Optional<Vec3> commanderPosition(ServerLevel level, UUID commanderId) {
+        return PROVIDERS.stream().filter(provider -> provider.recognizesCommander(level, commanderId))
+                .map(provider -> provider.commanderPosition(level, commanderId)).flatMap(Optional::stream).findFirst();
+    }
+
     public static Optional<CompoundTag> packCommander(ServerLevel level, UUID commanderId) {
         return PROVIDERS.stream().filter(provider -> provider.recognizesCommander(level, commanderId))
                 .map(provider -> provider.packCommander(level, commanderId)).flatMap(Optional::stream).findFirst();

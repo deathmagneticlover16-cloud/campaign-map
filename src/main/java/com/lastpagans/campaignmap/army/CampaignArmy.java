@@ -58,7 +58,7 @@ final class CampaignArmy {
         return new CampaignArmySnapshot(armyId, ownerId, name, commanderId, commanderVisual, commanderAvailable,
                 groupIds, flagTexture,
                 flagAspectRatio, position, path, state, foodSupplies, fatigue, soldiers,
-                transitionTicks, transitionTicksTotal);
+                true, transitionTicks, transitionTicksTotal);
     }
 
     CompoundTag save() {

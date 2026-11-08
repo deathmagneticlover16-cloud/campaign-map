@@ -4,6 +4,10 @@
 
 `MapProjection` owns every conversion between Minecraft X/Z and province-image pixel X/Y. Bounds are inclusive, normalized coordinates are independent of image resolution, maximum-edge pixels are clamped safely, and each axis flips only when configured.
 
+Army formation is metadata-only. It records a commander and owned Recruits groups at the commander's current position without invoking deployment or changing any entity position. Physical packing and placement occur only after the player explicitly enters movement mode and later deploys.
+
+Army synchronization is observer-specific. Owners receive exact composition; other players receive a server-calculated observed strength based on their distance from the army, and clients never receive the hidden total. Full observer snapshots refresh stationary as well as moving armies so every player's markers remain visible.
+
 `ProvinceRegistry` loads and validates bundled configuration and images. It maps RGB to `ProvinceDefinition`, maps stable IDs to definitions, derives adjacency by scanning touching pixels, and chooses valid interior label pixels. `getProvinceAt` follows world coordinate → projection → image pixel → RGB → definition.
 
 `CampaignOwnershipData` is overworld `SavedData`. It maps stable province IDs to separate owner and controller identities. Geography never changes when politics changes.

@@ -23,6 +23,7 @@ public record CampaignArmySnapshot(UUID armyId,
                                    int foodSupplies,
                                    double fatigue,
                                    int totalSoldiers,
+                                   boolean strengthExact,
                                    int transitionTicksRemaining,
                                    int transitionTicksTotal) {
     public CampaignArmySnapshot {

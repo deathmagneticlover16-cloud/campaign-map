@@ -38,6 +38,7 @@ public interface CampaignGroupProvider {
     default Optional<CommanderVisualSnapshot> commanderVisual(ServerLevel level, UUID commanderId) {
         return Optional.empty();
     }
+    default Optional<Vec3> commanderPosition(ServerLevel level, UUID commanderId) { return Optional.empty(); }
     default Optional<CompoundTag> packCommander(ServerLevel level, UUID commanderId) { return Optional.empty(); }
     default void deployCommander(ServerLevel level, UUID commanderId, Vec3 anchor, CompoundTag packedCommander) {}
 }

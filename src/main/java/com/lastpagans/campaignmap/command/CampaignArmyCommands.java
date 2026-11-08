@@ -111,11 +111,13 @@ public final class CampaignArmyCommands {
 
     private static int list(CommandSourceStack source) {
         var data = CampaignArmyData.get(source.getLevel());
-        var armies = data.snapshots(source.getLevel());
+        ServerPlayer observer = source.getEntity() instanceof ServerPlayer player ? player : null;
+        var armies = data.snapshots(source.getLevel()).stream()
+                .map(army -> observer == null ? army : CampaignNetwork.forObserver(army, observer)).toList();
         source.sendSuccess(() -> Component.literal("Campaign armies (" + armies.size() + "):"), false);
         armies.forEach(army -> source.sendSuccess(() -> Component.literal("- " + army.armyName() + " ["
                 + army.armyId() + "] " + army.state() + " groups=" + army.groupIds().size()
-                + " soldiers=" + army.totalSoldiers()), false));
+                + " soldiers=" + (army.strengthExact() ? army.totalSoldiers() : army.totalSoldiers() + "/???")), false));
         return armies.size();
     }
 
@@ -130,9 +132,12 @@ public final class CampaignArmyCommands {
                 || !com.lastpagans.campaignmap.api.army.CampaignGroupProviders.canManage(
                 source.getLevel(), player.getUUID(), groupId))
             throw ARMY_ERROR.create("Select an owned Recruits group which is not assigned to another army.");
-        CampaignArmySnapshot army = data.create(source.getLevel(), player.getUUID(),
-                name, commanderId, new Vec3(player.getX(), 0.0, player.getZ()));
-        data.addGroup(source.getLevel(), army.armyId(), player.getUUID(), groupId, false);
+        Vec3 commanderPosition = com.lastpagans.campaignmap.api.army.CampaignGroupProviders
+                .commanderPosition(source.getLevel(), commanderId).orElse(player.position());
+        CampaignArmySnapshot created = data.create(source.getLevel(), player.getUUID(),
+                name, commanderId, new Vec3(commanderPosition.x, 0.0, commanderPosition.z));
+        data.addGroup(source.getLevel(), created.armyId(), player.getUUID(), groupId, false);
+        CampaignArmySnapshot army = data.snapshot(source.getLevel(), created.armyId()).orElseThrow();
         CampaignNetwork.sendArmyUpdate(army);
         source.sendSuccess(() -> Component.literal("Created " + army.armyName() + " [" + army.armyId() + "]."), true);
         return 1;
@@ -140,11 +145,14 @@ public final class CampaignArmyCommands {
 
     private static int info(CommandSourceStack source, UUID armyId) throws CommandSyntaxException {
         CampaignArmySnapshot army = requireArmy(source, armyId);
-        source.sendSuccess(() -> Component.literal(army.armyName() + " [" + army.armyId() + "] owner="
-                + army.ownerId() + " commander=" + army.commanderId() + " state=" + army.state()
-                + " position=" + formatPosition(army.campaignPosition()) + " groups=" + army.groupIds()
-                + " soldiers=" + army.totalSoldiers() + " food=" + army.foodSupplies()
-                + " fatigue=" + String.format("%.2f", army.fatigue())), false);
+        if (source.getEntity() instanceof ServerPlayer observer)
+            army = CampaignNetwork.forObserver(army, observer);
+        CampaignArmySnapshot visible = army;
+        source.sendSuccess(() -> Component.literal(visible.armyName() + " [" + visible.armyId() + "] owner="
+                + visible.ownerId() + " commander=" + visible.commanderId() + " state=" + visible.state()
+                + " position=" + formatPosition(visible.campaignPosition()) + " groups=" + visible.groupIds()
+                + " soldiers=" + (visible.strengthExact() ? visible.totalSoldiers() : visible.totalSoldiers() + "/???")
+                + " food=" + visible.foodSupplies() + " fatigue=" + String.format("%.2f", visible.fatigue())), false);
         return 1;
     }
 

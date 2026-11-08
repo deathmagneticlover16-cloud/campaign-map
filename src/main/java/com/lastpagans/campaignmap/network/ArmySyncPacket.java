@@ -67,6 +67,7 @@ public record ArmySyncPacket(boolean replaceAll, List<CampaignArmySnapshot> armi
         buffer.writeVarInt(army.foodSupplies());
         buffer.writeDouble(army.fatigue());
         buffer.writeVarInt(army.totalSoldiers());
+        buffer.writeBoolean(army.strengthExact());
         buffer.writeVarInt(army.transitionTicksRemaining());
         buffer.writeVarInt(army.transitionTicksTotal());
     }
@@ -93,11 +94,12 @@ public record ArmySyncPacket(boolean replaceAll, List<CampaignArmySnapshot> armi
         int food = buffer.readVarInt();
         double fatigue = buffer.readDouble();
         int soldiers = buffer.readVarInt();
+        boolean strengthExact = buffer.readBoolean();
         int transitionRemaining = buffer.readVarInt();
         int transitionTotal = buffer.readVarInt();
         return new CampaignArmySnapshot(armyId, ownerId, name, commanderId, commanderVisual, commanderAvailable,
                 groups, texture, aspect,
-                position, path, state, food, fatigue, soldiers, transitionRemaining, transitionTotal);
+                position, path, state, food, fatigue, soldiers, strengthExact, transitionRemaining, transitionTotal);
     }
 
     private static void writeVec(FriendlyByteBuf buffer, Vec3 value) {

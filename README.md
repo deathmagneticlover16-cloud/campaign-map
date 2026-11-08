@@ -8,6 +8,9 @@ Forge 1.20.1 mod providing an authoritative province system, a smooth 3D campaig
 - Left-click a province to select it.
 - Use the mouse wheel to zoom, right-drag to pan, and middle-drag to angle the camera.
 - Select an army banner and right-click the map to issue a server-authoritative movement order.
+- Use **Form Army** (or `A`) to open the dedicated commander and group selection screen. Formation only records the association and the commander's current campaign position; it never moves recruits or commanders.
+- All players' armies appear on the campaign map. Enemy strength is server-redacted by observer distance, progressing from `???` through partial readings such as `34/???` to an exact count at close range.
+- March speed decreases with the army's current recruit count and is then reduced further by fatigue.
 - Select an army and press **Prepare to Move** first. Packing takes 5–30 seconds based on group count. Movement mode then stays active across any number of right-click orders until **Deploy Here** is pressed; deployment has its own 5–30 second timer before the real Recruits return at separated group anchors.
 - Press **A** to open army management and create an army from your available Recruits groups.
 - Press **P** inside the map to toggle the political tint layer.
@@ -76,4 +79,4 @@ Use Java 17 or a Gradle toolchain capable of obtaining Java 17:
 ./gradlew clean test build
 ```
 
-The project follows semantic versioning. This source revision is `0.3.4`.
+The project follows semantic versioning. This source revision is `0.4.0`.

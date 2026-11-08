@@ -49,8 +49,7 @@ public final class MountedCommanderRenderer {
         Set<UUID> live = new HashSet<>();
         for (ClientArmyCache.Entry entry : ClientArmyCache.entries()) {
             var army = entry.snapshot();
-            if (!army.commanderAvailable() || army.commanderVisual() == null
-                    || army.state() == ArmyState.DEPLOYED) continue;
+            if (!army.commanderAvailable() || army.commanderVisual() == null) continue;
             live.add(army.armyId());
             Proxies pair = proxies.get(army.armyId());
             if (pair == null || !pair.visual.equals(army.commanderVisual())) {

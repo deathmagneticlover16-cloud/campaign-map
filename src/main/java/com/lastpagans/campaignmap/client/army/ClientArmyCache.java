@@ -23,7 +23,11 @@ public final class ClientArmyCache {
     private ClientArmyCache() {}
 
     public static void apply(ArmySyncPacket packet) {
-        if (packet.replaceAll()) ARMIES.clear();
+        if (packet.replaceAll()) {
+            java.util.Set<UUID> incoming = packet.armies().stream()
+                    .map(CampaignArmySnapshot::armyId).collect(java.util.stream.Collectors.toSet());
+            ARMIES.keySet().removeIf(id -> !incoming.contains(id));
+        }
         packet.removedArmyIds().forEach(ARMIES::remove);
         double now = monotonicSeconds();
         for (CampaignArmySnapshot army : packet.armies()) {

@@ -16,6 +16,7 @@ import java.util.*;
 public final class CampaignArmyData extends SavedData {
     private static final String DATA_NAME = "campaignmap_armies";
     private static final double DEFAULT_MOVEMENT_SPEED = 8.0;
+    private static final int REFERENCE_ARMY_SIZE = 40;
     private final Map<UUID, CampaignArmy> armies = new LinkedHashMap<>();
     private final Map<UUID, UUID> groupMembership = new HashMap<>();
     private final Map<UUID, UUID> commanderMembership = new HashMap<>();
@@ -109,7 +110,8 @@ public final class CampaignArmyData extends SavedData {
         if (army.state != ArmyState.DEPLOYED && army.state != ArmyState.STATIONARY) return MembershipResult.NOT_ALLOWED;
         if (groupMembership.containsKey(groupId)) return MembershipResult.ALREADY_ASSIGNED;
         if (!bypassOwnership && (!CampaignGroupProviders.hasProviderFor(level, groupId)
-                || !CampaignGroupProviders.canManage(level, playerId, groupId))) return MembershipResult.NOT_ALLOWED;
+                || !CampaignGroupProviders.canManage(level, playerId, groupId)
+                || CampaignGroupProviders.soldierCount(level, groupId) <= 0)) return MembershipResult.NOT_ALLOWED;
         army.groupIds.add(groupId);
         groupMembership.put(groupId, armyId);
         setDirty();
@@ -194,7 +196,11 @@ public final class CampaignArmyData extends SavedData {
             Vec3 delta = destination.subtract(army.position);
             double remaining = delta.horizontalDistance();
             double fatigueMultiplier = Math.max(0.35, 1.0 - army.fatigue * 0.005);
-            double step = DEFAULT_MOVEMENT_SPEED * fatigueMultiplier / 20.0;
+            int soldiers = army.groupIds.stream()
+                    .mapToInt(group -> CampaignGroupProviders.soldierCount(level, group)).sum();
+            double sizeMultiplier = Math.max(0.35D, Math.min(1.25D,
+                    Math.sqrt(REFERENCE_ARMY_SIZE / (double) Math.max(REFERENCE_ARMY_SIZE, soldiers)) * 1.25D));
+            double step = DEFAULT_MOVEMENT_SPEED * sizeMultiplier * fatigueMultiplier / 20.0;
             if (remaining <= step || remaining < 1.0e-5) {
                 army.position = destination;
                 army.path.remove(0);
@@ -208,6 +214,17 @@ public final class CampaignArmyData extends SavedData {
         if (++commanderRefreshTicker >= 20) {
             commanderRefreshTicker = 0;
             for (CampaignArmy army : armies.values()) {
+                boolean groupsRemoved = army.groupIds.removeIf(group -> {
+                    if (CampaignGroupProviders.hasProviderFor(level, group)
+                            && CampaignGroupProviders.soldierCount(level, group) > 0) return false;
+                    groupMembership.remove(group, army.armyId);
+                    army.packedEntities.remove(group);
+                    return true;
+                });
+                if (groupsRemoved) {
+                    changed.removeIf(snapshot -> snapshot.armyId().equals(army.armyId));
+                    changed.add(army.snapshot(level));
+                }
                 if (army.commanderId == null || army.state != ArmyState.DEPLOYED) continue;
                 CampaignGroupProviders.commanderVisual(level, army.commanderId).ifPresent(visual -> {
                     if (!visual.equals(army.commanderVisual) || !army.commanderAvailable) {
@@ -252,26 +269,6 @@ public final class CampaignArmyData extends SavedData {
                     army.packedEntities.getOrDefault(groupId, new ListTag()));
             army.packedEntities.remove(groupId);
         }
-    }
-
-    public Optional<Vec3> deployedAnchor(UUID groupId) {
-        UUID armyId = groupMembership.get(groupId);
-        CampaignArmy army = armyId == null ? null : armies.get(armyId);
-        if (army == null || army.state != ArmyState.DEPLOYED) return Optional.empty();
-        int index = army.groupIds.indexOf(groupId);
-        if (index < 0) return Optional.empty();
-        double angle = Math.PI * 2.0 * index / Math.max(1, army.groupIds.size());
-        return Optional.of(army.position.add(Math.cos(angle) * 12.0, 0.0, Math.sin(angle) * 12.0));
-    }
-
-    public boolean deployNow(ServerLevel level, UUID armyId) {
-        CampaignArmy army = armies.get(armyId);
-        if (army == null) return false;
-        army.state = ArmyState.DEPLOYED;
-        deployGroups(level, army);
-        army.transitionTicks = 0;
-        setDirty();
-        return true;
     }
 
     public Optional<ArmyState> stateForGroup(UUID groupId) {

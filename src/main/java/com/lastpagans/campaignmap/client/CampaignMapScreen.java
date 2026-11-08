@@ -5,6 +5,7 @@ import com.lastpagans.campaignmap.api.ProvinceDefinition;
 import com.lastpagans.campaignmap.api.ProvinceOwnerState;
 import com.lastpagans.campaignmap.api.army.CampaignArmySnapshot;
 import com.lastpagans.campaignmap.client.army.CampaignBannerRenderer;
+import com.lastpagans.campaignmap.client.army.ArmyFormationScreen;
 import com.lastpagans.campaignmap.client.army.ClientArmyCache;
 import com.lastpagans.campaignmap.client.army.ClientGroupCatalog;
 import com.lastpagans.campaignmap.client.army.MountedCommanderRenderer;
@@ -65,6 +66,7 @@ public final class CampaignMapScreen extends Screen {
     private Button flagButton;
     private Button armyActionButton;
     private Button createArmyButton;
+    private Button formArmyButton;
     @Nullable private java.util.UUID editedArmy;
 
     public CampaignMapScreen() {
@@ -103,6 +105,8 @@ public final class CampaignMapScreen extends Screen {
                 .bounds(left + 14, height - 42, PANEL_WIDTH - 28, 24).build());
         createArmyButton = addRenderableWidget(Button.builder(Component.literal("CREATE ARMY"), button -> createSelectedArmy())
                 .bounds(left + 14, height - 42, PANEL_WIDTH - 28, 24).build());
+        formArmyButton = addRenderableWidget(Button.builder(Component.literal("FORM ARMY"), button -> openFormationScreen())
+                .bounds(left + 132, 27, 114, 20).build());
         hideArmyControls();
     }
 
@@ -129,7 +133,7 @@ public final class CampaignMapScreen extends Screen {
         graphics.disableScissor();
         renderPanel(graphics);
         syncArmyControls();
-        graphics.drawString(font, Component.literal("Wheel: zoom  •  Right-click: order  •  Right-drag: pan  •  Middle-drag: orbit  •  A: armies"),
+        graphics.drawString(font, Component.literal("Wheel: zoom  •  Right-click: order  •  Right-drag: pan  •  Middle-drag: orbit  •  A: Form Army"),
                 12, height - 17, 0xFFBBC2CB, false);
         super.render(graphics, mouseX, mouseY, partialTick);
     }
@@ -300,14 +304,20 @@ public final class CampaignMapScreen extends Screen {
         y += 17;
         y = statRow(graphics, left, y, "State", stateLabel(army));
         y = statRow(graphics, left, y, "Commander", commanderName(army));
-        y = statRow(graphics, left, y, "Strength", army.totalSoldiers() + " soldiers");
-        y = statRow(graphics, left, y, "Groups", Integer.toString(army.groupIds().size()));
+        String strength = army.strengthExact() ? army.totalSoldiers() + " soldiers"
+                : army.totalSoldiers() > 0 ? army.totalSoldiers() + "/??? soldiers" : "??? soldiers";
+        y = statRow(graphics, left, y, "Strength", strength);
+        y = statRow(graphics, left, y, "Groups",
+                army.strengthExact() ? Integer.toString(army.groupIds().size()) : "Unknown");
         y = statRow(graphics, left, y, "Supplies", Integer.toString(army.foodSupplies()));
         y = statRow(graphics, left, y, "Fatigue", String.format("%.1f", army.fatigue()));
         y += 7;
         graphics.drawString(font, "CONSTITUENT GROUPS", left + 14, y, 0xFF8D744B, false);
         y += 16;
-        for (String group : groupNameList(army)) {
+        if (!army.strengthExact()) {
+            graphics.drawString(font, "Move closer to identify this army", left + 17, y, 0xFF9EA7B3, false);
+        }
+        for (String group : army.strengthExact() ? groupNameList(army) : java.util.List.<String>of()) {
             if (y > height - 72) break;
             graphics.fill(left + 12, y - 3, width - 12, y + 14, 0x55303842);
             graphics.drawString(font, font.plainSubstrByWidth(group, PANEL_WIDTH - 36), left + 17, y, 0xFFE7E9EC, false);
@@ -421,6 +431,10 @@ public final class CampaignMapScreen extends Screen {
         pendingGroups.clear();
         pendingCommander = null;
         armyManagementMode = false;
+    }
+
+    private void openFormationScreen() {
+        minecraft.setScreen(new ArmyFormationScreen(this));
     }
 
     private java.util.List<String> groupNameList(CampaignArmySnapshot army) {
@@ -621,14 +635,7 @@ public final class CampaignMapScreen extends Screen {
             return super.keyPressed(keyCode, scanCode, modifiers);
         }
         if (keyCode == GLFW.GLFW_KEY_A) {
-            armyManagementMode = !armyManagementMode;
-            if (armyManagementMode) {
-                groupListOffset = 0;
-                commanderListOffset = 0;
-                pendingCommander = null;
-                appointingArmy = null;
-                CampaignNetwork.requestGroupCatalog();
-            }
+            openFormationScreen();
             return true;
         }
         if (keyCode == GLFW.GLFW_KEY_P) {

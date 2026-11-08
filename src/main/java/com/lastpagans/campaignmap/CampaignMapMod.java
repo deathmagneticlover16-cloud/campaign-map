@@ -28,6 +28,7 @@ public final class CampaignMapMod {
     public static final String MOD_ID = "campaignmap";
     public static final Logger LOGGER = LogUtils.getLogger();
     private int armySyncTicker;
+    private int armyIntelligenceTicker;
 
     public CampaignMapMod() {
         ProvinceRegistry.get();
@@ -79,6 +80,10 @@ public final class CampaignMapMod {
                 .filter(army -> periodicSync || army.movementPath().isEmpty()
                         || army.state() == ArmyState.STATIONARY)
                 .forEach(CampaignNetwork::sendArmyUpdate);
+        if (++armyIntelligenceTicker >= 20) {
+            armyIntelligenceTicker = 0;
+            CampaignNetwork.sendArmyIntelligence(level);
+        }
     }
 
     private static void registerRecruitsIntegration() {

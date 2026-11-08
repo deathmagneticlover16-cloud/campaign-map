@@ -127,11 +127,9 @@ public final class RecruitsCampaignGroupProvider implements CampaignGroupProvide
             }
             return;
         }
-        Vec3 anchor = armies.deployedAnchor(recruit.getGroup()).orElse(null);
-        if (anchor == null) return;
-        RecruitsGroup group = find(level, recruit.getGroup());
-        int index = group == null || group.members == null ? 0 : Math.max(0, group.members.indexOf(recruit.getUUID()));
-        place(level, recruit, anchor, index);
+        // A deployed army is only a campaign association. Loading or promoting a
+        // recruit must never teleport it to the army's stored campaign position.
+        return;
     }
 
     @Override
@@ -140,6 +138,7 @@ public final class RecruitsCampaignGroupProvider implements CampaignGroupProvide
         for (RecruitsGroup group : RecruitsGroupsSaveData.get(level).getAllGroups()) {
             if (group == null || group.removed || !playerId.equals(group.getPlayerUUID())) continue;
             int soldiers = group.members == null ? 0 : group.members.size();
+            if (soldiers <= 0) continue;
             result.add(new CampaignGroupSummary(group.getUUID(), group.getName(), soldiers));
         }
         return List.copyOf(result);
@@ -174,6 +173,12 @@ public final class RecruitsCampaignGroupProvider implements CampaignGroupProvide
     public Optional<CommanderVisualSnapshot> commanderVisual(ServerLevel level, UUID commanderId) {
         CommanderEntity commander = findCommander(level, commanderId);
         return commander == null || !commander.isAlive() ? Optional.empty() : Optional.of(visual(commander));
+    }
+
+    @Override
+    public Optional<Vec3> commanderPosition(ServerLevel level, UUID commanderId) {
+        CommanderEntity commander = findCommander(level, commanderId);
+        return commander == null || !commander.isAlive() ? Optional.empty() : Optional.of(commander.position());
     }
 
     @Override
